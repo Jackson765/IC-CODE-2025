@@ -15,9 +15,13 @@ import time
 import threading
 import pigpio
 
+import requests
+
 # ===================== USER CONFIG =====================
 PI_UDP_PORT = 5005
-PC_VIDEO_IP = "192.168.1.237"  # Your laptop IP - UPDATED
+PC_VIDEO_IP = "192.168.50.142"  # Your laptop IP - UPDATED
+# GV_IP = "game_viewer.local"
+GV_IP = "192.168.50.142:8080"
 PC_VIDEO_PORT = 5600
 
 # Motor pins (BCM)
@@ -463,6 +467,10 @@ async def main():
     setup_io()
     setup_ir_receivers()
     start_gstreamer_sender()
+    # r = requests.get(f"http://{GV_IP}/")
+    r = requests.put(f"http://{GV_IP}/robots",json = {"team_id":"-1"})
+    r = requests.put(f"http://{GV_IP}/robots",json = {"team_id":-1})
+    # r = requests.get("http://192.168.50.200:8080/")
     
     # Initialize timestamps
     now = time.time()
