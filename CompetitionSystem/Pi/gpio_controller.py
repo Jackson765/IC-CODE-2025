@@ -23,6 +23,15 @@ class GPIOController:
         print("[GPIO] Initializing extra GPIOs...")
         
         for name, gpio_cfg in self.gpio_config.items():
+            # Skip comment fields
+            if name.startswith('_'):
+                continue
+            
+            # Ensure gpio_cfg is a dict
+            if not isinstance(gpio_cfg, dict):
+                print(f"[GPIO] Skipping {name} - invalid config type")
+                continue
+            
             if not gpio_cfg.get('enabled', False):
                 continue
             
@@ -65,6 +74,15 @@ class GPIOController:
         print("[GPIO] Initializing status lights...")
         
         for name, light_cfg in self.lights_config.items():
+            # Skip comment fields
+            if name.startswith('_'):
+                continue
+            
+            # Ensure light_cfg is a dict
+            if not isinstance(light_cfg, dict):
+                print(f"[GPIO] Skipping {name} - invalid config type")
+                continue
+            
             if not light_cfg.get('enabled', False):
                 continue
             

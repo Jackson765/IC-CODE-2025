@@ -19,6 +19,15 @@ class ServoController:
         print("[Servo] Initializing servo controller...")
         
         for name, servo_config in self.config.items():
+            # Skip comment fields
+            if name.startswith('_'):
+                continue
+            
+            # Ensure servo_config is a dict
+            if not isinstance(servo_config, dict):
+                print(f"[Servo] Skipping {name} - invalid config type")
+                continue
+            
             if not servo_config.get('enabled', False):
                 print(f"[Servo] {name} disabled in config")
                 continue
