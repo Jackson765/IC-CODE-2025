@@ -527,25 +527,15 @@ GPIO:
     
     def robot_listener_loop(self):
         """Listen for status responses from robot"""
-        # Create a separate socket for receiving
-        listen_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listen_sock.settimeout(1.0)
-        
-        try:
-            # Bind to any available port
-            listen_sock.bind(('0.0.0.0', 0))
-            local_port = listen_sock.getsockname()[1]
-            print(f"[Robot] Listening for robot responses on port {local_port}")
-        except Exception as e:
-            print(f"[Robot] Failed to bind listener: {e}")
-            return
+        # Use the SAME socket that sends commands (self.robot_sock)
+        # This way Pi responses come back to the right place
+        self.robot_sock.settimeout(1.0)
         
         last_response_time = 0
         
         while self.running:
             try:
-                data, addr = listen_sock.recvfrom(4096)
+                data, addr = self.robot_sock.recvfrom(4096)
                 message = json.loads(data.decode('utf-8'))
                 
                 # Update connection status
