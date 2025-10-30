@@ -17,14 +17,14 @@ from typing import Optional, Dict
 
 # ============ DEFAULT CONFIG ============
 DEFAULT_CONFIG = {
-    "robot_ip": "192.168.1.10",
+    "robot_ip": "192.168.50.147",
     "robot_port": 5005,
-    "gv_ip": "192.168.1.50",
+    "gv_ip": "192.168.50.143",
     "gv_port": 6000,
     "video_port": 5100,
     "team_id": 1,
-    "team_name": "Team Alpha",
-    "robot_name": "Alpha-1",
+    "team_name": "Admin",
+    "robot_name": "Admin_Robot",
     "controls": {
         "base_speed": 0.6,
         "boost_speed": 1.0,

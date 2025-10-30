@@ -1,0 +1,29 @@
+{
+  "robot_ip": "192.168.50.147",
+  "robot_port": 4999,
+  "gv_ip": "192.168.50.142",
+  "gv_port": 6000,
+  "video_port": 5100,
+  "team_id": 1,
+  "team_name": "Admin",
+  "robot_name": "Admin_Robot",
+  "controls": {
+    "base_speed": 0.6,
+    "boost_speed": 1.0,
+    "forward": "w",
+    "backward": "s",
+    "left": "a",
+    "right": "d",
+    "boost": "shift_l",
+    "fire": "space",
+    "servo1_up": "q",
+    "servo1_down": "z",
+    "servo2_up": "e",
+    "servo2_down": "c",
+    "gpio1_toggle": "1",
+    "gpio2_toggle": "2",
+    "gpio3_toggle": "3",
+    "gpio4_toggle": "4",
+    "lights_toggle": "l"
+  }
+}
