@@ -45,18 +45,18 @@
   },
   
   "servos": {
-    "_comment": "Two servo channels - pulse width 1000-2000us",
+    "_comment": "HS-311 servos - pulse width 575-2460us for 202° rotation",
     "servo_1": {
       "gpio": 19,
-      "min_pulse_us": 1000,
-      "max_pulse_us": 2000,
+      "min_pulse_us": 575,
+      "max_pulse_us": 2460,
       "default_position": 1500,
       "enabled": true
     },
     "servo_2": {
       "gpio": 11,
-      "min_pulse_us": 1000,
-      "max_pulse_us": 2000,
+      "min_pulse_us": 575,
+      "max_pulse_us": 2460,
       "default_position": 1500,
       "enabled": true
     }
