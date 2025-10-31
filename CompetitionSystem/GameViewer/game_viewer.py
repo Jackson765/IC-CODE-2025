@@ -291,6 +291,7 @@ class GameViewer:
     def register_team(self, team_id: int, message: dict, addr: tuple, listen_port: int):
         """Register a new team"""
         if team_id not in self.teams:
+            # New team - create entry
             self.teams[team_id] = {
                 'team_id': team_id,
                 'team_name': message.get('team_name', f'Team {team_id}'),
@@ -300,11 +301,19 @@ class GameViewer:
                 'deaths': 0,
                 'ready': False,
                 'addr': addr,
+                'laptop_ip': addr[0],  # Store laptop IP separately
                 'listen_port': listen_port,  # Store laptop's listen port
                 'last_heartbeat': time.time(),
                 'video_port': self.config['video_ports_start'] + team_id - 1
             }
             print(f"[GV] Team registered: {self.teams[team_id]['team_name']} (ID: {team_id}) on port {listen_port}")
+        else:
+            # Team already exists - update laptop connection info
+            if listen_port is not None:
+                self.teams[team_id]['laptop_ip'] = addr[0]
+                self.teams[team_id]['listen_port'] = listen_port
+                self.teams[team_id]['last_heartbeat'] = time.time()
+                print(f"[GV] Laptop connected for team {team_id}: {addr[0]}:{listen_port}")
     
     def process_hit(self, hit_data: dict):
         """Process a hit report"""
@@ -343,11 +352,13 @@ class GameViewer:
         team = self.teams[team_id]
         if 'listen_port' not in team or team['listen_port'] is None:
             return
+        if 'laptop_ip' not in team or team['laptop_ip'] is None:
+            return
         
         try:
             data = json.dumps(message).encode('utf-8')
-            # Send to laptop's listen port (not the robot addr)
-            laptop_addr = (team['addr'][0], team['listen_port'])
+            # Send to laptop's IP and listen port
+            laptop_addr = (team['laptop_ip'], team['listen_port'])
             self.sock.sendto(data, laptop_addr)
         except Exception as e:
             print(f"[GV] Failed to send to team {team_id}: {e}")
