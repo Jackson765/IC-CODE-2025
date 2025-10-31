@@ -71,6 +71,9 @@ class GameViewer:
         # Start network listener
         self.start_network_thread()
         
+        # Start heartbeat sender
+        self.start_heartbeat_thread()
+        
         # Start update loop
         self.update_gui()
         
@@ -224,6 +227,25 @@ class GameViewer:
         thread.start()
         print("[GV] Network thread started")
     
+    def start_heartbeat_thread(self):
+        """Start heartbeat sender thread"""
+        thread = threading.Thread(target=self.heartbeat_loop, daemon=True)
+        thread.start()
+        print("[GV] Heartbeat thread started")
+    
+    def heartbeat_loop(self):
+        """Send periodic heartbeats to all connected laptops"""
+        while self.running:
+            try:
+                # Send heartbeat to all teams
+                for team_id in list(self.teams.keys()):
+                    self.send_to_team(team_id, {'type': 'HEARTBEAT', 'timestamp': time.time()})
+                
+                time.sleep(1.0)  # Send every 1 second
+            except Exception as e:
+                if self.running:
+                    print(f"[GV] Heartbeat error: {e}")
+    
     def network_loop(self):
         """Network listener loop"""
         while self.running:
@@ -246,7 +268,10 @@ class GameViewer:
         
         if msg_type == 'REGISTER':
             # Team registration
-            self.register_team(team_id, message, addr)
+            listen_port = message.get('listen_port')
+            self.register_team(team_id, message, addr, listen_port)
+            # Send acknowledgment back to laptop
+            self.send_to_team(team_id, {'type': 'REGISTER_ACK', 'status': 'connected'})
         
         elif msg_type == 'HEARTBEAT':
             # Update team heartbeat
@@ -263,7 +288,7 @@ class GameViewer:
             if team_id in self.teams:
                 self.teams[team_id]['ready'] = message.get('ready', False)
     
-    def register_team(self, team_id: int, message: dict, addr: tuple):
+    def register_team(self, team_id: int, message: dict, addr: tuple, listen_port: int):
         """Register a new team"""
         if team_id not in self.teams:
             self.teams[team_id] = {
@@ -275,10 +300,11 @@ class GameViewer:
                 'deaths': 0,
                 'ready': False,
                 'addr': addr,
+                'listen_port': listen_port,  # Store laptop's listen port
                 'last_heartbeat': time.time(),
                 'video_port': self.config['video_ports_start'] + team_id - 1
             }
-            print(f"[GV] Team registered: {self.teams[team_id]['team_name']} (ID: {team_id})")
+            print(f"[GV] Team registered: {self.teams[team_id]['team_name']} (ID: {team_id}) on port {listen_port}")
     
     def process_hit(self, hit_data: dict):
         """Process a hit report"""
@@ -308,6 +334,23 @@ class GameViewer:
         self.send_points_update(defender_id)
         
         print(f"[GV] Hit: Team {attacker_id} → Team {defender_id}")
+    
+    def send_to_team(self, team_id: int, message: dict):
+        """Send message to a specific team's laptop"""
+        if team_id not in self.teams:
+            return
+        
+        team = self.teams[team_id]
+        if 'listen_port' not in team or team['listen_port'] is None:
+            return
+        
+        try:
+            data = json.dumps(message).encode('utf-8')
+            # Send to laptop's listen port (not the robot addr)
+            laptop_addr = (team['addr'][0], team['listen_port'])
+            self.sock.sendto(data, laptop_addr)
+        except Exception as e:
+            print(f"[GV] Failed to send to team {team_id}: {e}")
     
     def send_points_update(self, team_id: int):
         """Send points update to a team"""
