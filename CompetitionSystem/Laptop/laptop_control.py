@@ -664,9 +664,8 @@ GPIO:
                 message = json.loads(data.decode('utf-8'))
                 
                 # Update GV connection status
-                current_time = time.time()
                 self.gv_connected = True
-                last_gv_message_time = current_time
+                last_gv_message_time = time.time()
                 
                 # Debug: Print first GV message
                 if not hasattr(self, '_debug_gv_msg'):
@@ -675,8 +674,10 @@ GPIO:
                 
                 self.handle_gv_message(message)
             except socket.timeout:
-                # Check if GV connection timed out (no messages for 3+ seconds)
-                if last_gv_message_time > 0 and time.time() - last_gv_message_time > 3.0:
+                # Check if GV connection timed out (no messages for 5+ seconds)
+                if time.time() - last_gv_message_time > 5.0:
+                    if self.gv_connected:  # Only print once when transitioning
+                        print("[GV] ⚠️ Connection timeout - no heartbeat")
                     self.gv_connected = False
                 continue
             except Exception as e:
@@ -708,7 +709,14 @@ GPIO:
         """Handle message from Game Viewer"""
         msg_type = message.get('type')
         
-        if msg_type == 'READY_CHECK':
+        if msg_type == 'HEARTBEAT':
+            # GV keepalive - do nothing, just updating last_gv_message_time is enough
+            pass
+        
+        elif msg_type == 'REGISTER_ACK':
+            print("[GV] Registration acknowledged")
+        
+        elif msg_type == 'READY_CHECK':
             print(f"[GV] Received ready check - Current status: {self.ready_status}")
             # Only respond if we're actually ready
             if self.ready_status:
