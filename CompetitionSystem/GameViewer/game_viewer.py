@@ -560,100 +560,448 @@ class GameViewer:
         self.root.after(100, self.update_gui)
     
     def open_camera_viewer(self):
-        """Open 4-camera security monitor view"""
-        import subprocess
+        """Open team selection dialog first"""
+        # Create team selection dialog
+        selection_dialog = tk.Toplevel(self.root)
+        selection_dialog.title("🎮 Select Teams for Camera View")
+        selection_dialog.geometry("450x400")
+        selection_dialog.configure(bg='#2a2a2a')
+        selection_dialog.transient(self.root)
+        selection_dialog.grab_set()
         
-        # Get team IDs to display (first 4 registered teams)
-        team_ids = sorted(list(self.teams.keys()))[:4]
+        # Title
+        tk.Label(selection_dialog, text="Select Teams for Camera View",
+                font=('Arial', 16, 'bold'), bg='#2a2a2a', fg='#00ff00').pack(pady=15)
         
-        if len(team_ids) == 0:
-            messagebox.showinfo("No Cameras", "No robots connected yet.\nWait for robots to register first.")
+        tk.Label(selection_dialog, text="Enter Team IDs (1-8) - Leave empty for unused slots:",
+                font=('Arial', 11), bg='#2a2a2a', fg='white').pack(pady=5)
+        
+        # Available teams display
+        if self.teams:
+            available_text = "Available Teams: " + ", ".join([f"{tid} ({self.teams[tid]['team_name']})" 
+                                                              for tid in sorted(self.teams.keys())])
+        else:
+            available_text = "No teams connected yet - You can still open the viewer"
+        
+        tk.Label(selection_dialog, text=available_text,
+                font=('Arial', 9), bg='#2a2a2a', fg='cyan', wraplength=400).pack(pady=5)
+        
+        # Input frame
+        input_frame = tk.Frame(selection_dialog, bg='#2a2a2a')
+        input_frame.pack(pady=20)
+        
+        # Create 4 entry fields
+        entries = []
+        for i in range(4):
+            row_frame = tk.Frame(input_frame, bg='#2a2a2a')
+            row_frame.pack(pady=5)
+            
+            tk.Label(row_frame, text=f"Camera {i+1} - Team ID:",
+                    font=('Arial', 11), bg='#2a2a2a', fg='white', width=18).pack(side=tk.LEFT, padx=5)
+            
+            entry = tk.Entry(row_frame, font=('Arial', 12), width=8,
+                           bg='#3a3a3a', fg='white', insertbackground='white',
+                           justify='center')
+            entry.pack(side=tk.LEFT, padx=5)
+            entries.append(entry)
+            
+            # Pre-fill with first 4 available teams
+            available_teams = sorted(self.teams.keys())
+            if i < len(available_teams):
+                entry.insert(0, str(available_teams[i]))
+        
+        # Info label
+        tk.Label(selection_dialog, text="💡 Tip: You can open with 1-4 teams",
+                font=('Arial', 9, 'italic'), bg='#2a2a2a', fg='#888888').pack(pady=5)
+        
+        # Error label
+        error_label = tk.Label(selection_dialog, text="",
+                              font=('Arial', 10), bg='#2a2a2a', fg='red')
+        error_label.pack(pady=5)
+        
+        # Buttons
+        btn_frame = tk.Frame(selection_dialog, bg='#2a2a2a')
+        btn_frame.pack(pady=20)
+        
+        def open_feeds():
+            # Get team IDs from entries
+            selected_teams = []
+            try:
+                for entry in entries:
+                    value = entry.get().strip()
+                    if value:  # Allow empty entries
+                        team_id = int(value)
+                        if team_id < 1 or team_id > 8:
+                            error_label.config(text=f"❌ Team ID must be between 1-8!")
+                            return
+                        if team_id in selected_teams:
+                            error_label.config(text=f"❌ Team {team_id} selected multiple times!")
+                            return
+                        selected_teams.append(team_id)
+                
+                if len(selected_teams) == 0:
+                    error_label.config(text="❌ Please enter at least one team ID!")
+                    return
+                
+                # Close dialog and open camera viewer
+                selection_dialog.destroy()
+                self.open_embedded_camera_viewer(selected_teams)
+                
+            except ValueError:
+                error_label.config(text="❌ Please enter valid numbers!")
+        
+        tk.Button(btn_frame, text="📹 Open Camera Feeds", command=open_feeds,
+                 font=('Arial', 12, 'bold'), bg='#4CAF50', fg='white',
+                 width=18, height=2).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(btn_frame, text="✗ Cancel", command=selection_dialog.destroy,
+                 font=('Arial', 12, 'bold'), bg='#f44336', fg='white',
+                 width=12, height=2).pack(side=tk.LEFT, padx=5)
+    
+    def open_embedded_camera_viewer(self, team_ids):
+        """Open embedded camera viewer with GStreamer via PyGObject"""
+        try:
+            import gi
+            gi.require_version('Gst', '1.0')
+            gi.require_version('GstVideo', '1.0')
+            from gi.repository import Gst, GLib, GstVideo
+            from PIL import Image, ImageTk
+            import numpy as np
+        except ImportError as e:
+            messagebox.showerror("Missing Dependencies", 
+                               "PyGObject or GStreamer not installed!\n\n" +
+                               f"Error: {e}\n\n" +
+                               "Run: sudo apt install python3-gi gir1.2-gstreamer-1.0")
             return
+        except ValueError as e:
+            messagebox.showerror("GStreamer Error", 
+                               f"GStreamer initialization failed!\n\n{e}")
+            return
+        
+        # Initialize GStreamer
+        Gst.init(None)
         
         # Create camera viewer window
         cam_window = tk.Toplevel(self.root)
-        cam_window.title("📹 Security Camera Monitor - 4 Feeds")
-        cam_window.geometry("1280x720")
+        cam_window.title("📹 Live Camera Monitor - Embedded Feeds")
+        cam_window.geometry("1400x900")
         cam_window.configure(bg='#000000')
         
-        # Title
-        tk.Label(cam_window, text="📹 LIVE CAMERA FEEDS", font=('Arial', 20, 'bold'),
-                bg='#000000', fg='#00ff00').pack(pady=10)
+        # Title bar
+        title_frame = tk.Frame(cam_window, bg='#1a1a1a')
+        title_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        tk.Label(title_frame, text="📹 LIVE CAMERA FEEDS - EMBEDDED VIEW", 
+                font=('Arial', 18, 'bold'), bg='#1a1a1a', fg='#00ff00').pack(pady=8)
         
         # Create 2x2 grid for cameras
         grid_frame = tk.Frame(cam_window, bg='#000000')
-        grid_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        grid_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Configure grid to be 2x2
+        # Configure grid
         grid_frame.grid_rowconfigure(0, weight=1)
         grid_frame.grid_rowconfigure(1, weight=1)
         grid_frame.grid_columnconfigure(0, weight=1)
         grid_frame.grid_columnconfigure(1, weight=1)
         
-        # Launch GStreamer windows for each team
-        gst_processes = []
+        # Video capture objects and display labels
+        video_pipelines = {}
+        video_labels = {}
+        status_labels = {}
+        retry_buttons = {}
+        video_frames = {}  # Store latest frames
         positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
         
+        def on_new_sample(sink, team_id):
+            """Callback when new video frame arrives"""
+            sample = sink.emit('pull-sample')
+            if sample:
+                buffer = sample.get_buffer()
+                caps = sample.get_caps()
+                
+                # Get video info
+                structure = caps.get_structure(0)
+                width = structure.get_value('width')
+                height = structure.get_value('height')
+                
+                # Get buffer data
+                success, map_info = buffer.map(Gst.MapFlags.READ)
+                if success:
+                    # Convert to numpy array
+                    frame_data = np.ndarray(
+                        shape=(height, width, 3),
+                        dtype=np.uint8,
+                        buffer=map_info.data
+                    )
+                    
+                    # Store frame for display
+                    video_frames[team_id] = frame_data.copy()
+                    
+                    buffer.unmap(map_info)
+            
+            return Gst.FlowReturn.OK
+        
+        def connect_to_stream(team_id, video_port):
+            """Helper function to create GStreamer pipeline for a video stream"""
+            try:
+                # Create GStreamer pipeline
+                pipeline_str = (
+                    f"udpsrc port={video_port} "
+                    f"caps=\"application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96\" ! "
+                    "rtpjitterbuffer latency=50 ! "
+                    "rtph264depay ! "
+                    "h264parse ! "
+                    "avdec_h264 ! "
+                    "videoconvert ! "
+                    "video/x-raw,format=RGB ! "
+                    "appsink name=sink emit-signals=true max-buffers=1 drop=true"
+                )
+                
+                print(f"[Camera] Creating pipeline for Team {team_id} on port {video_port}...")
+                print(f"[Camera] Pipeline: {pipeline_str}")
+                
+                pipeline = Gst.parse_launch(pipeline_str)
+                
+                # Get appsink element
+                sink = pipeline.get_by_name('sink')
+                sink.connect('new-sample', on_new_sample, team_id)
+                
+                # Start pipeline
+                ret = pipeline.set_state(Gst.State.PLAYING)
+                if ret == Gst.StateChangeReturn.FAILURE:
+                    print(f"[Camera] Failed to start pipeline for Team {team_id}")
+                    status_labels[team_id].config(text="❌ Pipeline Failed", fg='red')
+                    video_labels[team_id].config(text="❌ Pipeline Start Failed\n\nClick Retry", fg='red')
+                    return False
+                
+                video_pipelines[team_id] = pipeline
+                status_labels[team_id].config(text="✅ Pipeline Started", fg='lime')
+                print(f"[Camera] Team {team_id} pipeline started!")
+                return True
+                    
+            except Exception as e:
+                print(f"[Camera] Error creating pipeline for Team {team_id}: {e}")
+                status_labels[team_id].config(text=f"❌ Error", fg='red')
+                video_labels[team_id].config(
+                    text=f"❌ Pipeline Error\n\n{str(e)[:50]}\n\nClick Retry",
+                    fg='red'
+                )
+                return False
+        
         for idx, (row, col) in enumerate(positions):
-            frame = tk.Frame(grid_frame, bg='#1a1a1a', highlightbackground='#00ff00',
-                            highlightthickness=2)
-            frame.grid(row=row, column=col, sticky='nsew', padx=5, pady=5)
+            # Container frame for each camera
+            container = tk.Frame(grid_frame, bg='#1a1a1a', 
+                               highlightbackground='#00ff00', highlightthickness=2)
+            container.grid(row=row, column=col, sticky='nsew', padx=3, pady=3)
             
             if idx < len(team_ids):
                 team_id = team_ids[idx]
-                team = self.teams[team_id]
-                video_port = team['video_port']
                 
-                # Team label
-                tk.Label(frame, text=f"🤖 {team['team_name']} (ID: {team_id})",
-                        font=('Arial', 14, 'bold'), bg='#1a1a1a', fg='#00ff00').pack(pady=5)
+                # Check if team exists
+                if team_id in self.teams:
+                    team = self.teams[team_id]
+                    team_name = team['team_name']
+                    video_port = team['video_port']
+                else:
+                    # Team not connected yet, but we can still set up the slot
+                    team_name = f"Team {team_id}"
+                    video_port = self.config['video_ports_start'] + team_id - 1
                 
-                # Stream info
-                tk.Label(frame, text=f"UDP Port: {video_port}",
-                        font=('Courier', 10), bg='#1a1a1a', fg='cyan').pack()
+                # Info header
+                info_frame = tk.Frame(container, bg='#1a1a1a')
+                info_frame.pack(fill=tk.X, pady=2)
                 
-                # Launch GStreamer button
-                def make_launch_func(port, name):
-                    def launch():
-                        # Cross-platform GStreamer command (works on Ubuntu and Windows)
-                        cmd = [
-                            'gst-launch-1.0', '-v',
-                            f'udpsrc', f'port={port}',
-                            'caps=application/x-rtp,media=(string)video,clock-rate=(int)90000,encoding-name=(string)H264,payload=(int)96',
-                            '!', 'rtpjitterbuffer', 'latency=50',
-                            '!', 'rtph264depay',
-                            '!', 'h264parse',
-                            '!', 'avdec_h264',  # Cross-platform decoder
-                            '!', 'videoconvert',
-                            '!', 'autovideosink', 'sync=false'
-                        ]
-                        try:
-                            proc = subprocess.Popen(cmd)
-                            gst_processes.append(proc)
-                            print(f"[Camera] Launched viewer for {name} on port {port}")
-                        except Exception as e:
-                            messagebox.showerror("GStreamer Error",
-                                               f"Failed to launch camera viewer:\n{e}\n\n" +
-                                               "Make sure GStreamer is installed.")
-                    return launch
+                tk.Label(info_frame, text=f"🤖 {team_name} (Team {team_id})",
+                        font=('Arial', 11, 'bold'), bg='#1a1a1a', fg='#00ff00').pack()
                 
-                btn = tk.Button(frame, text="▶️ Open Camera Feed",
-                               command=make_launch_func(video_port, team['team_name']),
-                               bg='#4CAF50', fg='white', font=('Arial', 11), width=20, height=2)
-                btn.pack(pady=10)
+                tk.Label(info_frame, text=f"Port: {video_port}",
+                        font=('Courier', 8), bg='#1a1a1a', fg='cyan').pack()
                 
-                # Status indicator
-                status = "🟢 Online" if team['last_heartbeat'] > time.time() - 5 else "🔴 Offline"
-                tk.Label(frame, text=status, font=('Arial', 10), bg='#1a1a1a', fg='white').pack(pady=5)
+                # Video display area
+                video_label = tk.Label(container, bg='#000000', text="📺 Connecting...",
+                                     font=('Arial', 14), fg='yellow')
+                video_label.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+                video_labels[team_id] = video_label
+                
+                # Bottom control bar for this feed
+                bottom_bar = tk.Frame(container, bg='#1a1a1a')
+                bottom_bar.pack(fill=tk.X, pady=2)
+                
+                # Status label
+                status_label = tk.Label(bottom_bar, text="⏳ Initializing...",
+                                      font=('Arial', 9), bg='#1a1a1a', fg='yellow')
+                status_label.pack(side=tk.LEFT, padx=5)
+                status_labels[team_id] = status_label
+                
+                # Retry button for this specific feed
+                def make_retry_func(tid, vport):
+                    def retry():
+                        status_labels[tid].config(text="🔄 Retrying...", fg='yellow')
+                        video_labels[tid].config(text="🔄 Reconnecting...", fg='yellow')
+                        
+                        # Stop old pipeline if exists
+                        if tid in video_pipelines:
+                            try:
+                                video_pipelines[tid].set_state(Gst.State.NULL)
+                                del video_pipelines[tid]
+                            except:
+                                pass
+                        
+                        # Clear frame
+                        if tid in video_frames:
+                            del video_frames[tid]
+                        
+                        # Try to reconnect
+                        connect_to_stream(tid, vport)
+                    return retry
+                
+                retry_btn = tk.Button(bottom_bar, text="🔄 Retry", 
+                                     command=make_retry_func(team_id, video_port),
+                                     bg='#FF9800', fg='white', font=('Arial', 8, 'bold'),
+                                     width=8, height=1)
+                retry_btn.pack(side=tk.RIGHT, padx=5)
+                retry_buttons[team_id] = retry_btn
+                
+                # Try initial connection
+                connect_to_stream(team_id, video_port)
             else:
                 # Empty slot
-                tk.Label(frame, text="No Robot", font=('Arial', 14), bg='#1a1a1a', fg='#666666').pack(expand=True)
+                tk.Label(container, text="-- Empty Slot --", 
+                        font=('Arial', 14), bg='#1a1a1a', fg='#444444').pack(expand=True)
+        
+        # Control panel at bottom
+        control_frame = tk.Frame(cam_window, bg='#1a1a1a')
+        control_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        def reconnect_all():
+            """Reconnect all video streams"""
+            for team_id in list(video_labels.keys()):
+                status_labels[team_id].config(text="🔄 Reconnecting...", fg='yellow')
+                video_labels[team_id].config(text="🔄 Reconnecting...", fg='yellow')
+                
+                # Stop old pipeline if exists
+                if team_id in video_pipelines:
+                    try:
+                        video_pipelines[team_id].set_state(Gst.State.NULL)
+                        del video_pipelines[team_id]
+                    except:
+                        pass
+                
+                # Clear frame
+                if team_id in video_frames:
+                    del video_frames[team_id]
+                
+                # Get video port
+                if team_id in self.teams:
+                    video_port = self.teams[team_id]['video_port']
+                else:
+                    video_port = self.config['video_ports_start'] + team_id - 1
+                
+                # Try to reconnect
+                connect_to_stream(team_id, video_port)
+        
+        tk.Button(control_frame, text="🔄 Reconnect All", command=reconnect_all,
+                 bg='#FF9800', fg='white', font=('Arial', 10, 'bold'),
+                 width=15).pack(side=tk.LEFT, padx=10)
+        
+        info_label = tk.Label(control_frame, 
+                             text="💡 Embedded video feeds using GStreamer + PyGObject",
+                             font=('Arial', 9), bg='#1a1a1a', fg='#888888')
+        info_label.pack(side=tk.RIGHT, padx=10)
+        
+        # FPS tracking
+        fps_label = tk.Label(control_frame, text="FPS: --",
+                            font=('Arial', 10), bg='#1a1a1a', fg='cyan')
+        fps_label.pack(side=tk.LEFT, padx=10)
+        
+        # Video display update loop
+        last_frame_time = time.time()
+        frame_count = 0
+        
+        def update_video_display():
+            """Update video displays with latest frames"""
+            nonlocal last_frame_time, frame_count
+            
+            if not cam_window.winfo_exists():
+                return
+            
+            frame_count += 1
+            current_time = time.time()
+            
+            # Update FPS counter every second
+            if current_time - last_frame_time >= 1.0:
+                fps = frame_count / (current_time - last_frame_time)
+                fps_label.config(text=f"FPS: {fps:.1f}")
+                frame_count = 0
+                last_frame_time = current_time
+            
+            # Update each video label with latest frame
+            for team_id in video_labels.keys():
+                if team_id in video_frames:
+                    try:
+                        frame = video_frames[team_id]
+                        
+                        # Resize frame to fit display
+                        height, width = frame.shape[:2]
+                        display_width = 640
+                        display_height = int(display_width * height / width)
+                        
+                        # Limit height
+                        if display_height > 400:
+                            display_height = 400
+                            display_width = int(display_height * width / height)
+                        
+                        # Resize using PIL
+                        img = Image.fromarray(frame)
+                        img = img.resize((display_width, display_height), Image.Resampling.LANCZOS)
+                        
+                        # Add timestamp
+                        from PIL import ImageDraw, ImageFont
+                        draw = ImageDraw.Draw(img)
+                        timestamp = datetime.now().strftime("%H:%M:%S")
+                        try:
+                            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+                        except:
+                            font = ImageFont.load_default()
+                        draw.text((10, 10), timestamp, fill=(0, 255, 0), font=font)
+                        
+                        # Convert to PhotoImage
+                        photo = ImageTk.PhotoImage(image=img)
+                        
+                        # Update label
+                        video_labels[team_id].config(image=photo, text="")
+                        video_labels[team_id].image = photo  # Keep reference
+                        
+                        status_labels[team_id].config(text="🟢 Live", fg='lime')
+                    except Exception as e:
+                        print(f"[Camera] Display error for team {team_id}: {e}")
+                        status_labels[team_id].config(text="⚠️ Display Error", fg='orange')
+            
+            # Schedule next update (~30 FPS)
+            if cam_window.winfo_exists():
+                cam_window.after(33, update_video_display)
+        
+        # Start display updates
+        cam_window.after(500, update_video_display)
+        
+        # GStreamer main loop (process events)
+        def gst_mainloop():
+            """Process GStreamer events"""
+            if cam_window.winfo_exists():
+                # Process pending events
+                context = GLib.MainContext.default()
+                while context.pending():
+                    context.iteration(False)
+                cam_window.after(10, gst_mainloop)
+        
+        gst_mainloop()
         
         # Cleanup function
         def on_close():
-            for proc in gst_processes:
+            print("[Camera] Closing camera viewer...")
+            for pipeline in video_pipelines.values():
                 try:
-                    proc.terminate()
+                    pipeline.set_state(Gst.State.NULL)
                 except:
                     pass
             cam_window.destroy()

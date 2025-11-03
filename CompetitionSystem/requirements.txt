@@ -22,5 +22,9 @@ pygame>=2.5.0
 # Tkinter is usually included with Python
 # If not: sudo apt-get install python3-tk (Linux)
 
+# For embedded video feeds (camera viewer)
+opencv-python>=4.8.0
+pillow>=10.0.0
+
 # Optional: For PyQt5 version
 # PyQt5>=5.15.0
