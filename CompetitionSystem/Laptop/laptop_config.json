@@ -2,7 +2,7 @@
   "robot_ip": "192.168.50.146",
   "robot_port": 5005,
   "gv_ip": "192.168.50.87",
-  "gv_port": 6000,
+  "gv_port": 6000, 
   "laptop_listen_port": 6100,
   "video_port": 5100,
   "team_id": 1,

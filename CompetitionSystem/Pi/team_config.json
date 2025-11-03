@@ -40,8 +40,8 @@
       "start_end_burst_us": 2400,
       "tolerance_us": 200
     },
-    "weapon_cooldown_ms": 500,
-    "hit_disable_time_s": 7.0
+    "weapon_cooldown_ms": 2000,
+    "hit_disable_time_s": 10.0
   },
   
   "servos": {
