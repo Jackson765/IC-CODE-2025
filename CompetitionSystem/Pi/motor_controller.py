@@ -107,24 +107,20 @@ class MotorController:
         # Geometry term (half perimeter from center to wheel contact)
         k = 0.5*(wheelbase + track)
 
-        # Standard mecanum with omega positive = CCW.
-        # Your omega is CW(+), so convert: omega_ccw = -omega
-        omega_ccw = -omega
-
         # Wheel speeds (unnormalized)
-        fl =  vy + vx + omega_ccw * k   # Front-Left
-        fr =  vy - vx - omega_ccw * k   # Front-Right
-        rl =  vy - vx + omega_ccw * k   # Rear-Left
-        rr =  vy + vx - omega_ccw * k   # Rear-Right
+        fl =  vy + vx + omega * k   # Front-Left
+        fr =  vy - vx - omega * k   # Front-Right
+        rl =  vy - vx + omega * k   # Rear-Left
+        rr =  vy + vx - omega * k   # Rear-Right
 
         # Normalize to keep |speed| <= 1
         max_mag = max(1.0, abs(fl), abs(fr), abs(rl), abs(rr))
         fl, fr, rl, rr = fl/max_mag, fr/max_mag, rl/max_mag, rr/max_mag
 
         # Scale by requested speed (0..1)
-        fl *= max_speed
+        fl *= -max_speed
         fr *= max_speed
-        rl *= max_speed
+        rl *= -max_speed
         rr *= max_speed
 
         # Per-wheel inversion for wiring differences
