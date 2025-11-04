@@ -89,12 +89,12 @@ class MotorController:
         max_speed: speed multiplier (0 to 1)
         """
         # TUNED formulas for YOUR specific robot configuration
-        # After testing: arrows controlled forward/back, WASD controlled rotation
-        # This means omega and vy were swapped in hardware
-        fl = omega + vx + vy   # Front Left
-        fr = omega - vx - vy   # Front Right
-        rl = omega - vx + vy   # Rear Left
-        rr = omega + vx - vy   # Rear Right
+        # Inversions: vy negative (front→back flipped), omega negative (rotation flipped)
+        # Standard mecanum formula with corrections
+        fl = -vy + vx - omega   # Front Left
+        fr = -vy - vx + omega   # Front Right
+        rl = -vy - vx - omega   # Rear Left
+        rr = -vy + vx + omega   # Rear Right
         
         # Normalize to [-1, 1]
         max_magnitude = max(1.0, abs(fl), abs(fr), abs(rl), abs(rr))
