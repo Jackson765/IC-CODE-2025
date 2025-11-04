@@ -1256,7 +1256,7 @@ class GameViewer:
         tk.Label(selection_dialog, text="Select Teams for Camera View",
                 font=('Arial', 16, 'bold'), bg='#2a2a2a', fg='#00ff00').pack(pady=15)
         
-        tk.Label(selection_dialog, text="Enter Team IDs (1-8) - Leave empty for unused slots:",
+        tk.Label(selection_dialog, text="Enter Team IDs (1-254) - Leave empty for unused slots:",
                 font=('Arial', 11), bg='#2a2a2a', fg='white').pack(pady=5)
         
         # Available teams display
@@ -1314,8 +1314,8 @@ class GameViewer:
                     value = entry.get().strip()
                     if value:  # Allow empty entries
                         team_id = int(value)
-                        if team_id < 1 or team_id > 8:
-                            error_label.config(text=f"❌ Team ID must be between 1-8!")
+                        if team_id < 1 or team_id > 254:
+                            error_label.config(text=f"❌ Team ID must be between 1-254!")
                             return
                         if team_id in selected_teams:
                             error_label.config(text=f"❌ Team {team_id} selected multiple times!")
@@ -1367,25 +1367,53 @@ class GameViewer:
         # Create camera viewer window
         cam_window = tk.Toplevel(self.root)
         cam_window.title("📹 Live Camera Monitor - Embedded Feeds")
-        cam_window.geometry("1400x900")
         cam_window.configure(bg='#000000')
         
+        # Maximize window (cross-platform)
+        cam_window.attributes('-zoomed', True)  # Linux/Unix
+        cam_window.update_idletasks()
+        
+        # Get screen dimensions
+        screen_width = cam_window.winfo_screenwidth()
+        screen_height = cam_window.winfo_screenheight()
+        
+        # Calculate maximum dimensions for each quadrant
+        TITLE_HEIGHT = 60
+        CONTROL_HEIGHT = 50
+        INFO_BAR_HEIGHT = 50
+        BOTTOM_BAR_HEIGHT = 35
+        
+        GRID_HEIGHT = screen_height - TITLE_HEIGHT - CONTROL_HEIGHT
+        GRID_WIDTH = screen_width
+        
+        # Each quadrant gets half the grid space
+        QUADRANT_WIDTH = GRID_WIDTH // 2
+        QUADRANT_HEIGHT = GRID_HEIGHT // 2
+        
+        # Video area within quadrant (maximize, minimal padding)
+        VIDEO_WIDTH = QUADRANT_WIDTH - 20  # Small margin for borders
+        VIDEO_HEIGHT = QUADRANT_HEIGHT - INFO_BAR_HEIGHT - BOTTOM_BAR_HEIGHT - 15
+        
+        print(f"[Camera] Screen: {screen_width}x{screen_height}")
+        print(f"[Camera] Video size per feed: {VIDEO_WIDTH}x{VIDEO_HEIGHT}")
+        
         # Title bar
-        title_frame = tk.Frame(cam_window, bg='#1a1a1a')
-        title_frame.pack(fill=tk.X, pady=(0, 5))
+        title_frame = tk.Frame(cam_window, bg='#1a1a1a', height=TITLE_HEIGHT)
+        title_frame.pack(fill=tk.X)
+        title_frame.pack_propagate(False)
         
         tk.Label(title_frame, text="📹 LIVE CAMERA FEEDS - EMBEDDED VIEW", 
-                font=('Arial', 18, 'bold'), bg='#1a1a1a', fg='#00ff00').pack(pady=8)
+                font=('Arial', 18, 'bold'), bg='#1a1a1a', fg='#00ff00').pack(pady=10)
         
         # Create 2x2 grid for cameras
         grid_frame = tk.Frame(cam_window, bg='#000000')
         grid_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Configure grid
-        grid_frame.grid_rowconfigure(0, weight=1)
-        grid_frame.grid_rowconfigure(1, weight=1)
-        grid_frame.grid_columnconfigure(0, weight=1)
-        grid_frame.grid_columnconfigure(1, weight=1)
+        # Configure grid - ALWAYS configure both rows and columns for 2x2 grid
+        grid_frame.grid_rowconfigure(0, weight=1, uniform="row")
+        grid_frame.grid_rowconfigure(1, weight=1, uniform="row")
+        grid_frame.grid_columnconfigure(0, weight=1, uniform="col")
+        grid_frame.grid_columnconfigure(1, weight=1, uniform="col")
         
         # Video capture objects and display labels
         video_pipelines = {}
@@ -1393,7 +1421,6 @@ class GameViewer:
         status_labels = {}
         retry_buttons = {}
         video_frames = {}  # Store latest frames
-        positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
         
         def on_new_sample(sink, team_id):
             """Callback when new video frame arrives"""
@@ -1427,17 +1454,17 @@ class GameViewer:
         def connect_to_stream(team_id, video_port):
             """Helper function to create GStreamer pipeline for a video stream"""
             try:
-                # Create GStreamer pipeline
+                # Create GStreamer pipeline - OPTIMIZED FOR LOW LATENCY
                 pipeline_str = (
                     f"udpsrc port={video_port} "
                     f"caps=\"application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96\" ! "
-                    "rtpjitterbuffer latency=50 ! "
+                    "rtpjitterbuffer latency=0 drop-on-latency=true ! "  # Minimal buffering
                     "rtph264depay ! "
                     "h264parse ! "
-                    "avdec_h264 ! "
+                    "avdec_h264 max-threads=4 ! "  # Use multiple threads for decoding
                     "videoconvert ! "
                     "video/x-raw,format=RGB ! "
-                    "appsink name=sink emit-signals=true max-buffers=1 drop=true"
+                    "appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"  # No sync, drop old frames
                 )
                 
                 print(f"[Camera] Creating pipeline for Team {team_id} on port {video_port}...")
@@ -1471,86 +1498,96 @@ class GameViewer:
                 )
                 return False
         
-        for idx, (row, col) in enumerate(positions):
+        # Create camera feeds for selected teams
+        for idx, team_id in enumerate(team_ids):
+            # Calculate grid position (2x2 grid)
+            row = idx // 2
+            col = idx % 2
+            
             # Container frame for each camera
             container = tk.Frame(grid_frame, bg='#1a1a1a', 
                                highlightbackground='#00ff00', highlightthickness=2)
             container.grid(row=row, column=col, sticky='nsew', padx=3, pady=3)
             
-            if idx < len(team_ids):
-                team_id = team_ids[idx]
-                
-                # Check if team exists
-                if team_id in self.teams:
-                    team = self.teams[team_id]
-                    team_name = team['team_name']
-                    video_port = team['video_port']
-                else:
-                    # Team not connected yet, but we can still set up the slot
-                    team_name = f"Team {team_id}"
-                    video_port = self.config['video_ports_start'] + team_id - 1
-                
-                # Info header
-                info_frame = tk.Frame(container, bg='#1a1a1a')
-                info_frame.pack(fill=tk.X, pady=2)
-                
-                tk.Label(info_frame, text=f"🤖 {team_name} (Team {team_id})",
-                        font=('Arial', 11, 'bold'), bg='#1a1a1a', fg='#00ff00').pack()
-                
-                tk.Label(info_frame, text=f"Port: {video_port}",
-                        font=('Courier', 8), bg='#1a1a1a', fg='cyan').pack()
-                
-                # Video display area
-                video_label = tk.Label(container, bg='#000000', text="📺 Connecting...",
-                                     font=('Arial', 14), fg='yellow')
-                video_label.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
-                video_labels[team_id] = video_label
-                
-                # Bottom control bar for this feed
-                bottom_bar = tk.Frame(container, bg='#1a1a1a')
-                bottom_bar.pack(fill=tk.X, pady=2)
-                
-                # Status label
-                status_label = tk.Label(bottom_bar, text="⏳ Initializing...",
-                                      font=('Arial', 9), bg='#1a1a1a', fg='yellow')
-                status_label.pack(side=tk.LEFT, padx=5)
-                status_labels[team_id] = status_label
-                
-                # Retry button for this specific feed
-                def make_retry_func(tid, vport):
-                    def retry():
-                        status_labels[tid].config(text="🔄 Retrying...", fg='yellow')
-                        video_labels[tid].config(text="🔄 Reconnecting...", fg='yellow')
-                        
-                        # Stop old pipeline if exists
-                        if tid in video_pipelines:
-                            try:
-                                video_pipelines[tid].set_state(Gst.State.NULL)
-                                del video_pipelines[tid]
-                            except:
-                                pass
-                        
-                        # Clear frame
-                        if tid in video_frames:
-                            del video_frames[tid]
-                        
-                        # Try to reconnect
-                        connect_to_stream(tid, vport)
-                    return retry
-                
-                retry_btn = tk.Button(bottom_bar, text="🔄 Retry", 
-                                     command=make_retry_func(team_id, video_port),
-                                     bg='#FF9800', fg='white', font=('Arial', 8, 'bold'),
-                                     width=8, height=1)
-                retry_btn.pack(side=tk.RIGHT, padx=5)
-                retry_buttons[team_id] = retry_btn
-                
-                # Try initial connection
-                connect_to_stream(team_id, video_port)
+            # Check if team exists
+            if team_id in self.teams:
+                team = self.teams[team_id]
+                team_name = team['team_name']
+                video_port = team['video_port']
             else:
-                # Empty slot
-                tk.Label(container, text="-- Empty Slot --", 
-                        font=('Arial', 14), bg='#1a1a1a', fg='#444444').pack(expand=True)
+                # Team not connected yet, but we can still set up the slot
+                team_name = f"Team {team_id}"
+                video_port = self.config['video_ports_start'] + team_id - 1
+            
+            # Info header (compact to save space)
+            info_frame = tk.Frame(container, bg='#1a1a1a', height=INFO_BAR_HEIGHT)
+            info_frame.pack(fill=tk.X)
+            info_frame.pack_propagate(False)
+            
+            tk.Label(info_frame, text=f"🤖 {team_name} (Team {team_id})",
+                    font=('Arial', 10, 'bold'), bg='#1a1a1a', fg='#00ff00').pack(pady=2)
+            
+            tk.Label(info_frame, text=f"Port: {video_port}",
+                    font=('Courier', 8), bg='#1a1a1a', fg='cyan').pack()
+            
+            # Video display area - let it fill the container naturally
+            video_label = tk.Label(container, bg='#000000', text="📺 Connecting...",
+                                 font=('Arial', 14), fg='yellow')
+            video_label.pack(fill=tk.BOTH, expand=True)
+            video_labels[team_id] = video_label
+            
+            # Bottom control bar (compact to save space)
+            bottom_bar = tk.Frame(container, bg='#1a1a1a', height=BOTTOM_BAR_HEIGHT)
+            bottom_bar.pack(fill=tk.X)
+            bottom_bar.pack_propagate(False)
+            
+            # Status label
+            status_label = tk.Label(bottom_bar, text="⏳ Initializing...",
+                                  font=('Arial', 8), bg='#1a1a1a', fg='yellow')
+            status_label.pack(side=tk.LEFT, padx=5, pady=2)
+            status_labels[team_id] = status_label
+            
+            # Retry button for this specific feed
+            def make_retry_func(tid, vport):
+                def retry():
+                    status_labels[tid].config(text="🔄 Retrying...", fg='yellow')
+                    video_labels[tid].config(text="🔄 Reconnecting...", fg='yellow')
+                    
+                    # Stop old pipeline if exists
+                    if tid in video_pipelines:
+                        try:
+                            video_pipelines[tid].set_state(Gst.State.NULL)
+                            del video_pipelines[tid]
+                        except:
+                            pass
+                    
+                    # Clear frame
+                    if tid in video_frames:
+                        del video_frames[tid]
+                    
+                    # Try to reconnect
+                    connect_to_stream(tid, vport)
+                return retry
+            
+            retry_btn = tk.Button(bottom_bar, text="🔄 Retry", 
+                                 command=make_retry_func(team_id, video_port),
+                                 bg='#FF9800', fg='white', font=('Arial', 7, 'bold'),
+                                 width=6, height=1)
+            retry_btn.pack(side=tk.RIGHT, padx=5, pady=2)
+            retry_buttons[team_id] = retry_btn
+            
+            # Try initial connection
+            connect_to_stream(team_id, video_port)
+        
+        # Fill empty slots to maintain grid structure
+        for slot in range(len(team_ids), 4):
+            row = slot // 2
+            col = slot % 2
+            empty_container = tk.Frame(grid_frame, bg='#1a1a1a', 
+                                      highlightbackground='#333333', highlightthickness=2)
+            empty_container.grid(row=row, column=col, sticky='nsew', padx=3, pady=3)
+            tk.Label(empty_container, text="-- Empty Slot --", 
+                    font=('Arial', 14), bg='#1a1a1a', fg='#444444').pack(expand=True)
         
         # Control panel at bottom
         control_frame = tk.Frame(cam_window, bg='#1a1a1a')
@@ -1624,22 +1661,23 @@ class GameViewer:
                     try:
                         frame = video_frames[team_id]
                         
-                        # Resize frame to fit display - use label size for equal spacing
-                        label_width = video_labels[team_id].winfo_width()
-                        label_height = video_labels[team_id].winfo_height()
+                        # Get actual label dimensions (after window is rendered)
+                        label = video_labels[team_id]
+                        label_width = label.winfo_width()
+                        label_height = label.winfo_height()
                         
-                        # Use actual label dimensions (equal quadrants)
-                        if label_width > 10 and label_height > 10:  # Valid dimensions
-                            display_width = label_width - 10
-                            display_height = label_height - 10
+                        # Use actual dimensions if available, otherwise use calculated values
+                        if label_width > 10 and label_height > 10:
+                            display_width = label_width
+                            display_height = label_height
                         else:
-                            # Fallback for initial sizing
-                            display_width = 680
-                            display_height = 420
+                            # Fallback to calculated dimensions for initial render
+                            display_width = VIDEO_WIDTH
+                            display_height = VIDEO_HEIGHT
                         
-                        # Resize using PIL
+                        # Resize using PIL - FASTER BILINEAR instead of LANCZOS for lower latency
                         img = Image.fromarray(frame)
-                        img = img.resize((display_width, display_height), Image.Resampling.LANCZOS)
+                        img = img.resize((display_width, display_height), Image.Resampling.BILINEAR)
                         
                         # Add overlays
                         from PIL import ImageDraw, ImageFont
@@ -1671,25 +1709,29 @@ class GameViewer:
                                 img = img.convert('RGB')
                                 draw = ImageDraw.Draw(img)
                                 
-                                # Large DISABLED text
-                                text = "🚫 DISABLED"
-                                text_bbox = draw.textbbox((0, 0), text, font=font_large)
-                                text_width = text_bbox[2] - text_bbox[0]
-                                text_height = text_bbox[3] - text_bbox[1]
+                                # Large DISABLED text (no emoji)
+                                text = "DISABLED"
+                                
+                                # Get actual text dimensions for proper centering
+                                left, top, right, bottom = draw.textbbox((0, 0), text, font=font_large)
+                                text_width = right - left
+                                text_height = bottom - top
+                                
+                                # Center on the RESIZED image dimensions (display_width, display_height)
                                 x = (display_width - text_width) // 2
-                                y = (display_height - text_height) // 2 - 30
+                                y = (display_height - text_height) // 2 - 40
                                 
                                 # Black shadow for text
-                                draw.text((x+2, y+2), text, fill=(0, 0, 0), font=font_large)
+                                draw.text((x+3, y+3), text, fill=(0, 0, 0), font=font_large)
                                 draw.text((x, y), text, fill=(255, 0, 0), font=font_large)
                                 
                                 # Time remaining
                                 time_text = f"{time_left}s"
-                                time_bbox = draw.textbbox((0, 0), time_text, font=font_large)
-                                time_width = time_bbox[2] - time_bbox[0]
+                                left, top, right, bottom = draw.textbbox((0, 0), time_text, font=font_large)
+                                time_width = right - left
                                 time_x = (display_width - time_width) // 2
-                                time_y = y + text_height + 10
-                                draw.text((time_x+2, time_y+2), time_text, fill=(0, 0, 0), font=font_large)
+                                time_y = y + text_height + 20
+                                draw.text((time_x+3, time_y+3), time_text, fill=(0, 0, 0), font=font_large)
                                 draw.text((time_x, time_y), time_text, fill=(255, 255, 0), font=font_large)
                                 
                                 status_labels[team_id].config(text=f"🔴 DISABLED ({time_left}s)", fg='red')
@@ -1710,14 +1752,14 @@ class GameViewer:
                         print(f"[Camera] Display error for team {team_id}: {e}")
                         status_labels[team_id].config(text="⚠️ Display Error", fg='orange')
             
-            # Schedule next update (~30 FPS)
+            # Schedule next update - FASTER for lower latency (60 FPS target)
             if cam_window.winfo_exists():
-                cam_window.after(33, update_video_display)
+                cam_window.after(16, update_video_display)  # ~60 FPS (was 33ms/30fps)
         
-        # Start display updates
-        cam_window.after(500, update_video_display)
+        # Start display updates immediately
+        cam_window.after(100, update_video_display)  # Start faster (was 500ms)
         
-        # GStreamer main loop (process events)
+        # GStreamer main loop (process events) - MORE FREQUENT
         def gst_mainloop():
             """Process GStreamer events"""
             if cam_window.winfo_exists():
@@ -1725,7 +1767,7 @@ class GameViewer:
                 context = GLib.MainContext.default()
                 while context.pending():
                     context.iteration(False)
-                cam_window.after(10, gst_mainloop)
+                cam_window.after(5, gst_mainloop)  # Check more frequently (was 10ms)
         
         gst_mainloop()
         
