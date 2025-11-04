@@ -88,13 +88,13 @@ class MotorController:
         omega: rotation (-1 to 1, negative = CCW, positive = CW)
         max_speed: speed multiplier (0 to 1)
         """
-        # Calculate wheel speeds for mecanum drive
-        # FL and RR spin together for forward/backward and strafe
-        # FR and RL spin together for forward/backward and strafe (opposite)
-        fl = vy + vx + omega   # Front Left
-        fr = vy - vx - omega   # Front Right
-        rl = vy - vx + omega   # Rear Left
-        rr = vy + vx - omega   # Rear Right
+        # TUNED formulas for YOUR specific robot configuration
+        # After testing: arrows controlled forward/back, WASD controlled rotation
+        # This means omega and vy were swapped in hardware
+        fl = omega + vx + vy   # Front Left
+        fr = omega - vx - vy   # Front Right
+        rl = omega - vx + vy   # Rear Left
+        rr = omega + vx - vy   # Rear Right
         
         # Normalize to [-1, 1]
         max_magnitude = max(1.0, abs(fl), abs(fr), abs(rl), abs(rr))
