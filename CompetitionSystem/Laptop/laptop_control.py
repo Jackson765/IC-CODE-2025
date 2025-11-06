@@ -19,7 +19,7 @@ from typing import Optional, Dict
 DEFAULT_CONFIG = {
     "robot_ip": "192.168.50.147",
     "robot_port": 5005,
-    "gv_ip": "192.168.50.143",
+    "gv_ip": "192.168.50.67",
     "gv_port": 6000,
     "video_port": 5100,
     "team_id": 1,
@@ -282,6 +282,12 @@ class RobotControlGUI:
         self.game_active = False
         self.game_time_remaining = 0
         
+        # Disabled state
+        self.is_disabled = False
+        self.disabled_by = ""
+        self.disabled_until = 0
+        self.disabled_time_remaining = 0
+        
         # Network
         self.robot_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.gv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -340,6 +346,7 @@ class RobotControlGUI:
         
         # Create sections
         self.create_mode_frame(left_frame)
+        self.create_disabled_frame(left_frame)  # Add disabled status frame
         self.create_team_info_frame(left_frame)
         self.create_game_status_frame(left_frame)
         self.create_connection_frame(left_frame)
@@ -380,6 +387,37 @@ class RobotControlGUI:
                                      width=15, height=2,
                                      state='disabled')
         self.unready_btn.pack(side='left', padx=5)
+    
+    def create_disabled_frame(self, parent):
+        """Disabled status frame - shows when robot is disabled"""
+        self.disabled_frame = tk.LabelFrame(parent, text="⚠️ ROBOT DISABLED", 
+                                           font=('Arial', 12, 'bold'),
+                                           bg='#ff0000', fg='white', padx=10, pady=10)
+        # Don't pack yet - only show when disabled
+        
+        self.disabled_status_label = tk.Label(self.disabled_frame, 
+                                             text="YOU HAVE BEEN HIT!",
+                                             font=('Arial', 16, 'bold'), 
+                                             bg='#ff0000', fg='white')
+        self.disabled_status_label.pack()
+        
+        self.disabled_by_label = tk.Label(self.disabled_frame, 
+                                         text="Disabled by: Unknown",
+                                         font=('Arial', 12), 
+                                         bg='#ff0000', fg='white')
+        self.disabled_by_label.pack(pady=5)
+        
+        self.disabled_timer_label = tk.Label(self.disabled_frame, 
+                                            text="00:00",
+                                            font=('Arial', 32, 'bold'), 
+                                            bg='#ff0000', fg='white')
+        self.disabled_timer_label.pack(pady=10)
+        
+        self.disabled_info_label = tk.Label(self.disabled_frame, 
+                                           text="Controls are locked",
+                                           font=('Arial', 10), 
+                                           bg='#ff0000', fg='white')
+        self.disabled_info_label.pack()
     
     def create_team_info_frame(self, parent):
         """Team info frame"""
@@ -580,8 +618,23 @@ GPIO:
                 # Get current control state
                 state = self.keyboard.update()
                 
+                # Check if robot is disabled - if so, send stop commands
+                if self.is_disabled:
+                    # Send all-stop command
+                    cmd = {
+                        'type': 'CONTROL',
+                        'vx': 0,
+                        'vy': 0,
+                        'vr': 0,
+                        'servo1': state['servo1'],  # Allow servo control when disabled
+                        'servo2': state['servo2'],
+                        'gpio': [False, False, False, False],  # Turn off all GPIO
+                        'lights': False  # Turn off lights
+                    }
+                    self.send_to_robot(cmd)
+                
                 # Only send controls in debug mode or during active game
-                if not self.game_mode or (self.game_mode and self.game_active):
+                elif not self.game_mode or (self.game_mode and self.game_active):
                     # Build command
                     cmd = {
                         'type': 'CONTROL',
@@ -766,6 +819,22 @@ GPIO:
         elif msg_type == 'HIT_NOTIFICATION':
             self.hits_taken += 1
             print(f"[GV] Hit taken! Total: {self.hits_taken}")
+        
+        elif msg_type == 'ROBOT_DISABLED':
+            # Robot has been disabled by enemy hit
+            self.is_disabled = True
+            self.disabled_by = message.get('disabled_by', 'Unknown')
+            self.disabled_until = message.get('disabled_until', 0)
+            duration = message.get('duration', 10)
+            print(f"[GV] DISABLED by {self.disabled_by} for {duration}s!")
+        
+        elif msg_type == 'ROBOT_ENABLED':
+            # Robot has been re-enabled
+            self.is_disabled = False
+            self.disabled_by = ""
+            self.disabled_until = 0
+            self.disabled_time_remaining = 0
+            print("[GV] ROBOT RE-ENABLED!")
     
     def toggle_ready(self):
         """Toggle ready status"""
@@ -827,6 +896,33 @@ GPIO:
         """Update GUI periodically"""
         if not self.running:
             return
+        
+        # Update disabled state
+        if self.is_disabled:
+            # Calculate time remaining
+            current_time = time.time()
+            self.disabled_time_remaining = max(0, self.disabled_until - current_time)
+            
+            # Show disabled frame if not already shown
+            if not self.disabled_frame.winfo_ismapped():
+                self.disabled_frame.pack(fill='x', pady=5, after=self.mode_label.master)
+            
+            # Update disabled info
+            self.disabled_by_label.config(text=f"Disabled by: {self.disabled_by}")
+            seconds = int(self.disabled_time_remaining)
+            millis = int((self.disabled_time_remaining % 1) * 10)
+            self.disabled_timer_label.config(text=f"{seconds:02d}.{millis:01d}")
+            
+            # Apply red theme to main frames
+            self.root.configure(bg='#330000')
+            
+        else:
+            # Hide disabled frame if shown
+            if self.disabled_frame.winfo_ismapped():
+                self.disabled_frame.pack_forget()
+            
+            # Restore normal theme
+            self.root.configure(bg='#1a1a1a')
         
         # Update connection status
         if self.robot_connected:

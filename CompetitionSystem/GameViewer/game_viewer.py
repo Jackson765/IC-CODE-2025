@@ -737,6 +737,16 @@ class GameViewer:
         disable_until = time.time() + self.config['robot_disable_duration']
         self.disabled_robots[defender_id] = disable_until
         
+        # Notify defender they are disabled
+        disable_message = {
+            'type': 'ROBOT_DISABLED',
+            'disabled_by': self.teams[attacker_id]['team_name'],
+            'disabled_by_id': attacker_id,
+            'duration': self.config['robot_disable_duration'],
+            'disabled_until': disable_until
+        }
+        self.send_to_team(defender_id, disable_message)
+        
         # Add to hit log with timestamp
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {self.teams[attacker_id]['team_name']} HIT {self.teams[defender_id]['team_name']} (Disabled for {self.config['robot_disable_duration']}s)"
@@ -1190,6 +1200,22 @@ class GameViewer:
             return
         
         current_time = time.time()
+        
+        # Check for robots that should be re-enabled
+        robots_to_enable = []
+        for team_id, disable_until in list(self.disabled_robots.items()):
+            if current_time >= disable_until:
+                robots_to_enable.append(team_id)
+        
+        # Send re-enable notifications
+        for team_id in robots_to_enable:
+            del self.disabled_robots[team_id]
+            enable_message = {
+                'type': 'ROBOT_ENABLED',
+                'timestamp': current_time
+            }
+            self.send_to_team(team_id, enable_message)
+            print(f"[GV] Team {team_id} re-enabled")
         
         # Update game timer
         if self.game_active:
