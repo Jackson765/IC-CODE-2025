@@ -235,6 +235,18 @@ class RobotSystem:
                 self.last_cmd_time = time.time()
                 return
             
+            elif msg_type == 'GAME_START':
+                # Game start from laptop (laptop only sends if ready)
+                print("[System] 🎮 GAME_START from laptop!")
+                self.on_game_start()
+                return
+            
+            elif msg_type == 'GAME_END':
+                # Game end from laptop
+                print("[System] 🏁 GAME_END from laptop!")
+                self.on_game_end()
+                return
+            
             elif msg_type == 'CONTROL':
                 # Update robot state - NEW FORMAT from WASD laptop
                 self.vx = float(message.get('vx', 0))

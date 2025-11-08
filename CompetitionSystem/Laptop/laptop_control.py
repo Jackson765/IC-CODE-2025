@@ -688,14 +688,8 @@ GPIO:
         
         self.start_video_btn = tk.Button(btn_frame, text="▶ Start Stream",
                                          command=self.start_video,
-                                         bg='#00aa00', fg='white', width=12)
-        self.start_video_btn.pack(side='left', padx=2)
-        
-        self.stop_video_btn = tk.Button(btn_frame, text="⬛ Stop Stream",
-                                        command=self.stop_video,
-                                        bg='#aa0000', fg='white', width=12,
-                                        state='disabled')
-        self.stop_video_btn.pack(side='left', padx=2)
+                                         bg='#00aa00', fg='white', width=15)
+        self.start_video_btn.pack(padx=2)
     
     def create_settings_button(self, parent):
         """Settings button"""
@@ -837,8 +831,8 @@ GPIO:
                 # Get current control state
                 state = self.keyboard.update()
                 
-                # Check if robot is disabled - if so, send stop commands
-                if self.is_disabled:
+                # Check if robot is disabled OR ready but game not started - if so, send stop commands
+                if self.is_disabled or (self.ready_status and not self.game_active):
                     # Send all-stop command
                     cmd = {
                         'type': 'CONTROL',
@@ -1032,19 +1026,40 @@ GPIO:
                 print("[GV] Not ready - no response sent")
             
         elif msg_type == 'GAME_START':
-            print("[GV] GAME STARTING!")
-            self.game_mode = True
-            self.game_active = True
-            self.game_time_remaining = message.get('duration', 120)  # Default 2 minutes
-            self.points = 0
-            self.hits_taken = 0
-            self.shots_fired = 0
+            # ONLY start game if we're ready!
+            if self.ready_status:
+                print("[GV] GAME STARTING! (We are ready)")
+                self.game_mode = True
+                self.game_active = True
+                self.game_time_remaining = message.get('duration', 120)  # Default 2 minutes
+                self.points = 0
+                self.hits_taken = 0
+                self.shots_fired = 0
+                
+                # Forward GAME_START to Pi
+                pi_message = {
+                    'type': 'GAME_START',
+                    'duration': message.get('duration', 120)
+                }
+                self.send_to_robot(pi_message)
+            else:
+                print("[GV] ⚠️ GAME_START received but we're NOT READY - ignoring!")
             
         elif msg_type == 'GAME_END':
             print("[GV] Game ended")
             self.game_active = False
             final_points = message.get('points', self.points)
             self.points = final_points
+            
+            # Forward GAME_END to Pi to put robot into standby
+            pi_message = {
+                'type': 'GAME_END'
+            }
+            self.send_to_robot(pi_message)
+            
+            # Keep game_mode True and ready_status True so robot stays locked
+            # User must click "Not Ready" to return to debug mode
+            print("[GV] ⏸️ WAITING MODE - Click 'Not Ready' to return to debug mode")
             
         elif msg_type == 'POINTS_UPDATE':
             # Update points, kills, and deaths from GV
@@ -1100,12 +1115,13 @@ GPIO:
         if self.ready_status:
             self.ready_btn.config(state='disabled')
             self.unready_btn.config(state='normal')
-            print("[GV] Marked as READY")
+            print("[GV] Marked as READY - Robot movement locked until game starts")
         else:
             self.ready_btn.config(state='normal')
             self.unready_btn.config(state='disabled')
             self.game_mode = False
-            print("[GV] Marked as NOT READY")
+            self.game_active = False  # Also clear game_active
+            print("[GV] Marked as NOT READY - Returning to DEBUG MODE")
     
     # ============ VIDEO ============
     
@@ -1121,7 +1137,6 @@ GPIO:
             
             self.video_status_label.config(text="Stream: Running", fg='#00ff00')
             self.start_video_btn.config(state='disabled')
-            self.stop_video_btn.config(state='normal')
             print(f"[Video] Started stream on port {port}")
         except Exception as e:
             messagebox.showerror("Video Error", f"Failed to start video: {e}")
@@ -1135,7 +1150,6 @@ GPIO:
             
             self.video_status_label.config(text="Stream: Stopped", fg='#888888')
             self.start_video_btn.config(state='normal')
-            self.stop_video_btn.config(state='disabled')
             print("[Video] Stopped stream")
     
     # ============ GUI UPDATE ============
@@ -1195,6 +1209,10 @@ GPIO:
         if self.game_active:
             self.mode_label.config(text="GAME ACTIVE", fg='#ff0000')
             self.game_status_label.config(text="🔥 IN GAME", fg='#ff0000')
+        elif self.ready_status and not self.game_active:
+            # Ready but game hasn't started yet (or just ended - WAITING mode)
+            self.mode_label.config(text="WAITING MODE", fg='#ffaa00')
+            self.game_status_label.config(text="⏸️ STANDBY", fg='#ffaa00')
         elif self.game_mode:
             self.mode_label.config(text="GAME MODE", fg='#ffaa00')
             self.game_status_label.config(text="⏳ WAITING", fg='#ffaa00')
