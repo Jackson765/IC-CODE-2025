@@ -931,14 +931,19 @@ class GameViewer:
                  width=12, height=2).pack(side=tk.LEFT, padx=5)
     
     def start_game_with_teams(self, selected_team_ids):
-        """Start the game with specific teams"""
-        # Check if teams are ready (optional)
-        ready_teams = sum(1 for tid in selected_team_ids if self.teams[tid]['ready'])
-        if ready_teams < len(selected_team_ids):
-            result = messagebox.askyesno("Not All Ready",
-                                        f"Only {ready_teams}/{len(selected_team_ids)} selected teams are ready. Start anyway?")
-            if not result:
-                return
+        """Start the game with specific teams - FORCE READY STATE"""
+        # FORCE all selected teams into ready state (no confirmation needed)
+        for team_id in selected_team_ids:
+            if not self.teams[team_id]['ready']:
+                # Force ready status
+                self.teams[team_id]['ready'] = True
+                # Send FORCE_READY message to laptop to update its state
+                force_ready_msg = {
+                    'type': 'FORCE_READY',
+                    'reason': 'Game Viewer started match'
+                }
+                self.send_to_team(team_id, force_ready_msg)
+                print(f"[GV] 🔧 Forced team {team_id} into READY state")
         
         # Start game
         self.game_active = True

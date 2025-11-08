@@ -1024,26 +1024,35 @@ GPIO:
                 print("[GV] Sent READY response")
             else:
                 print("[GV] Not ready - no response sent")
+        
+        elif msg_type == 'FORCE_READY':
+            # Game Viewer is forcing us into ready state for match start
+            print(f"[GV] 🔧 FORCE_READY received - {message.get('reason', 'No reason given')}")
+            self.ready_status = True
+            self.game_mode = True
+            
+            # Update UI buttons
+            self.ready_btn.config(state='disabled')
+            self.unready_btn.config(state='normal')
+            
+            print("[GV] ✅ Forced into READY state - Robot movement locked")
             
         elif msg_type == 'GAME_START':
-            # ONLY start game if we're ready!
-            if self.ready_status:
-                print("[GV] GAME STARTING! (We are ready)")
-                self.game_mode = True
-                self.game_active = True
-                self.game_time_remaining = message.get('duration', 120)  # Default 2 minutes
-                self.points = 0
-                self.hits_taken = 0
-                self.shots_fired = 0
-                
-                # Forward GAME_START to Pi
-                pi_message = {
-                    'type': 'GAME_START',
-                    'duration': message.get('duration', 120)
-                }
-                self.send_to_robot(pi_message)
-            else:
-                print("[GV] ⚠️ GAME_START received but we're NOT READY - ignoring!")
+            # Game Viewer already forced us ready, so just start the game
+            print("[GV] GAME STARTING!")
+            self.game_mode = True
+            self.game_active = True
+            self.game_time_remaining = message.get('duration', 120)  # Default 2 minutes
+            self.points = 0
+            self.hits_taken = 0
+            self.shots_fired = 0
+            
+            # Forward GAME_START to Pi
+            pi_message = {
+                'type': 'GAME_START',
+                'duration': message.get('duration', 120)
+            }
+            self.send_to_robot(pi_message)
             
         elif msg_type == 'GAME_END':
             print("[GV] Game ended")
