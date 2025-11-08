@@ -1340,8 +1340,8 @@ class GameViewer:
                     value = entry.get().strip()
                     if value:  # Allow empty entries
                         team_id = int(value)
-                        if team_id < 1 or team_id > 8:
-                            error_label.config(text=f"❌ Team ID must be between 1-8!")
+                        if team_id < 1 or team_id > 254:
+                            error_label.config(text=f"❌ Team ID must be between 1-254!")
                             return
                         if team_id in selected_teams:
                             error_label.config(text=f"❌ Team {team_id} selected multiple times!")
@@ -1393,7 +1393,7 @@ class GameViewer:
         # Create camera viewer window
         cam_window = tk.Toplevel(self.root)
         cam_window.title("📹 Live Camera Monitor - Embedded Feeds")
-        cam_window.geometry("1400x900")
+        cam_window.geometry("1920x1080")
         cam_window.configure(bg='#000000')
         
         # Title bar
@@ -1403,15 +1403,16 @@ class GameViewer:
         tk.Label(title_frame, text="📹 LIVE CAMERA FEEDS - EMBEDDED VIEW", 
                 font=('Arial', 18, 'bold'), bg='#1a1a1a', fg='#00ff00').pack(pady=8)
         
-        # Create 2x2 grid for cameras
+        # Create 2x2 grid for cameras with fixed dimensions for 1920x1080 screen
         grid_frame = tk.Frame(cam_window, bg='#000000')
         grid_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Configure grid
-        grid_frame.grid_rowconfigure(0, weight=1)
-        grid_frame.grid_rowconfigure(1, weight=1)
-        grid_frame.grid_columnconfigure(0, weight=1)
-        grid_frame.grid_columnconfigure(1, weight=1)
+        # Configure grid - fixed size, no weight (no auto-fit)
+        # Each quadrant is 960x540 pixels (half of 1920x1080)
+        grid_frame.grid_rowconfigure(0, weight=0, minsize=520)
+        grid_frame.grid_rowconfigure(1, weight=0, minsize=520)
+        grid_frame.grid_columnconfigure(0, weight=0, minsize=940)
+        grid_frame.grid_columnconfigure(1, weight=0, minsize=940)
         
         # Video capture objects and display labels
         video_pipelines = {}
@@ -1650,18 +1651,10 @@ class GameViewer:
                     try:
                         frame = video_frames[team_id]
                         
-                        # Resize frame to fit display - use label size for equal spacing
-                        label_width = video_labels[team_id].winfo_width()
-                        label_height = video_labels[team_id].winfo_height()
-                        
-                        # Use actual label dimensions (equal quadrants)
-                        if label_width > 10 and label_height > 10:  # Valid dimensions
-                            display_width = label_width - 10
-                            display_height = label_height - 10
-                        else:
-                            # Fallback for initial sizing
-                            display_width = 680
-                            display_height = 420
+                        # Fixed dimensions for 1920x1080 screen - each quadrant is 960x540
+                        # Account for borders and padding
+                        display_width = 920  # 960 - 40 (padding/borders)
+                        display_height = 480  # 520 - 40 (padding/borders/header)
                         
                         # Resize using PIL
                         img = Image.fromarray(frame)
