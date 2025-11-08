@@ -721,26 +721,31 @@ GPIO:
         self.gv_registration_thread.start()
     
     def gv_registration_loop(self):
-        """Periodic registration with Game Viewer"""
+        """Periodic registration with Game Viewer - ONLY IF DISCONNECTED"""
+        # Initial registration happens in gv_listener_loop
+        # This loop only re-registers if connection is lost
+        
         while self.running:
             try:
-                # Re-register every 30 seconds
-                time.sleep(30.0)
+                # Check connection status every 5 seconds
+                time.sleep(5.0)
                 
-                if self.running:  # Check again after sleep
-                    local_port = 6100 + self.config.get_team_id()
-                    self.register_with_gv(local_port)
-                    
-                    # Also check if we've lost contact with GV
-                    current_time = time.time()
-                    if self.last_gv_contact > 0 and (current_time - self.last_gv_contact) > 10.0:
-                        print("[GV] ⚠️ Lost contact with Game Viewer - re-registering")
+                if not self.running:
+                    break
+                
+                # ONLY re-register if we've lost connection (no heartbeat for 15+ seconds)
+                current_time = time.time()
+                if not self.gv_connected and self.last_gv_contact > 0:
+                    if (current_time - self.last_gv_contact) > 15.0:
+                        print("[GV] 🔄 Connection lost - attempting re-registration...")
+                        local_port = 6100 + self.config.get_team_id()
                         self.register_with_gv(local_port)
+                        time.sleep(5.0)  # Wait before next attempt
                         
             except Exception as e:
                 if self.running:
                     print(f"[GV] Registration loop error: {e}")
-                time.sleep(30.0)
+                time.sleep(5.0)
     
     def robot_listener_loop(self):
         """Listen for status responses from robot"""
@@ -775,6 +780,33 @@ GPIO:
                     if message.get('fire_success', False):
                         self.shots_fired += 1
                         print(f"[Robot] 🔥 Shot fired! Total: {self.shots_fired}")
+                    
+                    # CHECK IR STATUS FROM PI - SYNC DISABLED STATE!
+                    # This works TOGETHER with GV's ROBOT_DISABLED message
+                    # Pi is the SOURCE OF TRUTH for hit state, GV handles scoring
+                    ir_status = message.get('ir_status', {})
+                    if ir_status:
+                        pi_is_hit = ir_status.get('is_hit', False)
+                        time_remaining = ir_status.get('time_remaining', 0)
+                        
+                        # If Pi says we're hit but laptop doesn't know - SYNC IT!
+                        if pi_is_hit and not self.is_disabled:
+                            hit_by_team = ir_status.get('hit_by_team', 0)
+                            
+                            print(f"[Robot] 💥 SYNCING DISABLED STATE from Pi! Hit by Team {hit_by_team}, {time_remaining:.1f}s remaining")
+                            self.is_disabled = True
+                            self.disabled_by = f"Team {hit_by_team}"
+                            self.disabled_until = time.time() + time_remaining
+                            # Don't increment hits_taken here - GV will send POINTS_UPDATE with deaths count
+                        
+                        # If Pi says we're NOT hit but laptop thinks we are - CLEAR IT!
+                        elif not pi_is_hit and self.is_disabled:
+                            print(f"[Robot] ✅ SYNCING ENABLED STATE from Pi - respawned!")
+                            self.is_disabled = False
+                            self.disabled_by = ""
+                            self.disabled_until = 0
+                            self.disabled_time_remaining = 0
+                    
                     continue
                 
                 # Debug: Print first response
@@ -917,6 +949,7 @@ GPIO:
                 
                 # Update GV connection status
                 self.gv_connected = True
+                self.last_gv_contact = time.time()  # Track last contact time
                 last_gv_message_time = time.time()
                 
                 # Debug: Print first GV message
@@ -1026,12 +1059,22 @@ GPIO:
             print(f"[GV] Hit taken! Total: {self.hits_taken}")
         
         elif msg_type == 'ROBOT_DISABLED':
-            # Robot has been disabled by enemy hit
-            self.is_disabled = True
-            self.disabled_by = message.get('disabled_by', 'Unknown')
-            self.disabled_until = message.get('disabled_until', 0)
-            duration = message.get('duration', 10)
-            print(f"[GV] DISABLED by {self.disabled_by} for {duration}s!")
+            # Robot has been disabled by enemy hit (from GV)
+            # This works TOGETHER with Pi's ir_status sync
+            # GV provides team name, Pi provides hit state
+            # Only update if we're not already disabled (avoid override)
+            if not self.is_disabled:
+                self.is_disabled = True
+                self.disabled_by = message.get('disabled_by', 'Unknown')
+                self.disabled_until = message.get('disabled_until', 0)
+                duration = message.get('duration', 10)
+                print(f"[GV] 💥 DISABLED by {self.disabled_by} for {duration}s!")
+            else:
+                # Already disabled from Pi sync - just update the name
+                friendly_name = message.get('disabled_by', 'Unknown')
+                if self.disabled_by.startswith('Team ') and friendly_name != 'Unknown':
+                    self.disabled_by = friendly_name
+                    print(f"[GV] Updated disabled-by name: {friendly_name}")
         
         elif msg_type == 'ROBOT_ENABLED':
             # Robot has been re-enabled
