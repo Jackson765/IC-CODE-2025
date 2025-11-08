@@ -1108,18 +1108,26 @@ GPIO:
             current_time = time.time()
             self.disabled_time_remaining = max(0, self.disabled_until - current_time)
             
-            # Show disabled frame if not already shown
-            if not self.disabled_frame.winfo_ismapped():
-                self.disabled_frame.pack(fill='x', pady=5, after=self.mode_label.master)
-            
-            # Update disabled info
-            self.disabled_by_label.config(text=f"Disabled by: {self.disabled_by}")
-            seconds = int(self.disabled_time_remaining)
-            millis = int((self.disabled_time_remaining % 1) * 10)
-            self.disabled_timer_label.config(text=f"{seconds:02d}.{millis:01d}")
-            
-            # Apply red theme to main frames
-            self.root.configure(bg='#330000')
+            # CHECK IF TIMER EXPIRED - AUTO RE-ENABLE!
+            if self.disabled_time_remaining <= 0:
+                print("[Laptop] ✅ Disabled timer expired - RE-ENABLING ROBOT!")
+                self.is_disabled = False
+                self.disabled_by = ""
+                self.disabled_until = 0
+                self.disabled_time_remaining = 0
+            else:
+                # Show disabled frame if not already shown
+                if not self.disabled_frame.winfo_ismapped():
+                    self.disabled_frame.pack(fill='x', pady=5, after=self.mode_label.master)
+                
+                # Update disabled info
+                self.disabled_by_label.config(text=f"Disabled by: {self.disabled_by}")
+                seconds = int(self.disabled_time_remaining)
+                millis = int((self.disabled_time_remaining % 1) * 10)
+                self.disabled_timer_label.config(text=f"{seconds:02d}.{millis:01d}")
+                
+                # Apply red theme to main frames
+                self.root.configure(bg='#330000')
             
         else:
             # Hide disabled frame if shown
