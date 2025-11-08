@@ -19,10 +19,11 @@ class CameraStreamer:
         self.framerate = self.camera_config.get('framerate', 30)
         self.bitrate = self.camera_config.get('bitrate', 4000000)
         
-        self.laptop_ip = self.network_config['laptop_ip']
-        # Auto-calculate ports based on team_id
-        self.laptop_port = 5100 + self.team_id
+        # Laptop IP will be set when laptop connects
+        self.laptop_ip = None
+        self.laptop_port = self.network_config['laptop_video_port']
         
+        # GV video port is calculated: 5000 + team_id
         self.gv_ip = self.network_config['game_viewer_ip']
         self.gv_port = 5000 + self.team_id
         
@@ -37,6 +38,10 @@ class CameraStreamer:
         
         if not self.camera_config.get('enabled', True):
             print("[Camera] Camera disabled in config")
+            return False
+        
+        if not self.laptop_ip:
+            print("[Camera] ⚠️ No laptop IP set - waiting for laptop connection")
             return False
         
         print("[Camera] Starting dual video stream...")

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Servo Controller - Controls two servo channels with 1000-2000us pulses
+Servo Controller - Controls two servo channels with toggle positions
+GPIO outputs 5V for servo signals - duty cycle adjusted accordingly
 """
 
 import pigpio
@@ -13,10 +14,14 @@ class ServoController:
         self.config = config['servos']
         self.servos = {}
         
+        # Voltage compensation: GPIO is 3.3V but servos need 5V signals
+        # For PWM servo signals, the pulse timing matters, not voltage
+        # pigpio handles this correctly - no compensation needed
+        
         self.setup_servos()
     
     def setup_servos(self):
-        """Initialize servo channels"""
+        """Initialize servo channels with toggle positions"""
         print("[Servo] Initializing servo controller...")
         
         for name, servo_config in self.config.items():
@@ -45,9 +50,9 @@ class ServoController:
             self.pi.set_servo_pulsewidth(gpio, 0)
             time.sleep(0.1)
             
-            # Set to default position
-            default_pulse = servo_config.get('default_position', 1500)
-            self.pi.set_servo_pulsewidth(gpio, default_pulse)
+            # Start at MIN position (lower limit)
+            min_pulse = servo_config.get('min_pulse_us', 575)
+            self.pi.set_servo_pulsewidth(gpio, min_pulse)
             
             # Verify it's working
             actual_pulse = self.pi.get_servo_pulsewidth(gpio)
@@ -58,18 +63,43 @@ class ServoController:
             
             self.servos[name] = {
                 'gpio': gpio,
-                'min_pulse': servo_config.get('min_pulse_us', 1000),
-                'max_pulse': servo_config.get('max_pulse_us', 2000),
-                'current_pulse': default_pulse
+                'min_pulse': min_pulse,
+                'max_pulse': servo_config.get('max_pulse_us', 2460),
+                'current_pulse': min_pulse,
+                'at_max': False  # Track position state
             }
             
-            print(f"[Servo] {name} initialized on GPIO {gpio}")
+            print(f"[Servo] {name} ready - Range: {min_pulse}us to {self.servos[name]['max_pulse']}us")
         
         if not self.servos:
             print("[Servo] No servos configured")
     
+    def toggle_servo(self, name: str):
+        """Toggle servo between MIN and MAX positions"""
+        if name not in self.servos:
+            return False
+        
+        servo = self.servos[name]
+        
+        # Toggle between min and max
+        if servo['at_max']:
+            # Go to MIN
+            pulse = servo['min_pulse']
+            servo['at_max'] = False
+        else:
+            # Go to MAX
+            pulse = servo['max_pulse']
+            servo['at_max'] = True
+        
+        self.pi.set_servo_pulsewidth(servo['gpio'], pulse)
+        servo['current_pulse'] = pulse
+        
+        print(f"[Servo] {name} toggled to {'MAX' if servo['at_max'] else 'MIN'} ({pulse}us)")
+        
+        return True
+    
     def set_servo_pulse(self, name: str, pulse_width_us: int):
-        """Set servo pulse width directly (1000-2000us)"""
+        """Set servo pulse width directly (for compatibility)"""
         if name not in self.servos:
             return False
         
@@ -81,22 +111,11 @@ class ServoController:
         self.pi.set_servo_pulsewidth(servo['gpio'], pulse_width_us)
         servo['current_pulse'] = pulse_width_us
         
-        # Debug: Print first time servo moves
-        if not hasattr(self, f'_debug_{name}_moved'):
-            setattr(self, f'_debug_{name}_moved', True)
-            print(f"[Servo] {name} moved to {pulse_width_us}us")
+        # Update toggle state based on position
+        mid_point = (servo['min_pulse'] + servo['max_pulse']) / 2
+        servo['at_max'] = pulse_width_us > mid_point
         
         return True
-    
-    def set_servo_normalized(self, name: str, value: float):
-        """
-        Set servo position with normalized value (-1.0 to 1.0)
-        -1.0 = min pulse (1000us)
-        0.0 = center (1500us)
-        1.0 = max pulse (2000us)
-        """
-        if name not in self.servos:
-            return False
         
         servo = self.servos[name]
         

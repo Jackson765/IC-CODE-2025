@@ -65,6 +65,7 @@ class RobotSystem:
         
         # Network
         self.laptop_sock = None
+        self.laptop_ip = None  # Will be set from first laptop message
         
         # Initialize all systems
         self.initialize_systems()
@@ -199,24 +200,37 @@ class RobotSystem:
             data, addr = self.laptop_sock.recvfrom(1024)
             message = json.loads(data.decode('utf-8'))
             
+            # Update laptop IP from first message
+            if self.laptop_ip is None:
+                self.laptop_ip = addr[0]
+                print(f"[System] 📡 Laptop connected from {self.laptop_ip}")
+                # Update camera streamer with laptop IP
+                if self.camera_streamer:
+                    self.camera_streamer.update_destinations(laptop_ip=self.laptop_ip)
+            
             msg_type = message.get('type', 'CONTROL')
+            
+            # Handle CONFIG_REQUEST - laptop wants our config
+            if msg_type == 'CONFIG_REQUEST':
+                print(f"[System] 📡 Config request from {addr}")
+                response = {
+                    'type': 'CONFIG_RESPONSE',
+                    'config': self.config
+                }
+                response_data = json.dumps(response).encode('utf-8')
+                self.laptop_sock.sendto(response_data, addr)
+                print(f"[System] ✅ Sent config to laptop")
+                return
             
             # Debug: Print first message received
             if not hasattr(self, '_debug_first_msg'):
                 self._debug_first_msg = True
                 print(f"[System] ✅ First laptop message received from {addr}")
                 print(f"[System] Message type: {msg_type}, keys: {list(message.keys())}")
-                
-                # Send team info to laptop on first contact
-                self.send_team_info(addr)
             
             # Handle different message types
             if msg_type == 'HEARTBEAT':
                 self.last_cmd_time = time.time()
-                # Respond to heartbeat with team info periodically
-                if not hasattr(self, '_last_info_send') or time.time() - self._last_info_send > 5.0:
-                    self.send_team_info(addr)
-                    self._last_info_send = time.time()
                 return
             
             elif msg_type == 'CONTROL':
@@ -231,11 +245,27 @@ class RobotSystem:
                 self.last_cmd_time = time.time()
                 self.last_input_time = time.time()
                 
-                # Handle servo commands - NEW FORMAT
-                if 'servo1' in message:
-                    self.servo_controller.set_servo_normalized('servo_1', message['servo1'])
-                if 'servo2' in message:
-                    self.servo_controller.set_servo_normalized('servo_2', message['servo2'])
+                # Handle servo TOGGLES - NEW FORMAT
+                if 'servo1_toggle' in message:
+                    toggle_state = bool(message['servo1_toggle'])
+                    # Set to MAX or MIN based on toggle state
+                    if toggle_state:
+                        # MAX position
+                        max_pulse = self.servo_controller.servos.get('servo_1', {}).get('max_pulse', 2460)
+                        self.servo_controller.set_servo_pulse('servo_1', max_pulse)
+                    else:
+                        # MIN position
+                        min_pulse = self.servo_controller.servos.get('servo_1', {}).get('min_pulse', 575)
+                        self.servo_controller.set_servo_pulse('servo_1', min_pulse)
+                
+                if 'servo2_toggle' in message:
+                    toggle_state = bool(message['servo2_toggle'])
+                    if toggle_state:
+                        max_pulse = self.servo_controller.servos.get('servo_2', {}).get('max_pulse', 2460)
+                        self.servo_controller.set_servo_pulse('servo_2', max_pulse)
+                    else:
+                        min_pulse = self.servo_controller.servos.get('servo_2', {}).get('min_pulse', 575)
+                        self.servo_controller.set_servo_pulse('servo_2', min_pulse)
                 
                 # Handle GPIO commands - NEW FORMAT (array instead of dict)
                 if 'gpio' in message:
@@ -252,9 +282,10 @@ class RobotSystem:
                     self.gpio_controller.set_light('d1', lights_on)
                     self.gpio_controller.set_light('d2', lights_on)
                 
-                # Fire weapon
+                # Fire weapon (send actual fire count back to laptop)
+                fire_success = False
                 if self.fire:
-                    self.ir_controller.fire()
+                    fire_success = self.ir_controller.fire()
                 
                 # Exit standby if movement detected
                 if self.in_standby and (abs(self.vx) > 0.05 or abs(self.vy) > 0.05 or 
@@ -263,7 +294,12 @@ class RobotSystem:
                         self.motor_controller.exit_standby()
                         self.in_standby = False
                 
-                # Send status back to laptop
+                # Send status back to laptop (include fire confirmation)
+                status = {
+                    'type': 'STATUS',
+                    'fire_success': fire_success  # Tell laptop if fire actually happened
+                }
+                self.laptop_sock.sendto(json.dumps(status).encode('utf-8'), addr)
                 response = {
                     "type": "STATUS",
                     "ir_status": self.ir_controller.get_status(),
@@ -284,20 +320,6 @@ class RobotSystem:
                 import traceback
                 traceback.print_exc()
             pass
-    
-    def send_team_info(self, addr):
-        """Send team configuration info to laptop"""
-        try:
-            info = {
-                "type": "TEAM_INFO",
-                "team_id": self.config['team']['team_id'],
-                "team_name": self.config['team']['team_name'],
-                "robot_name": self.config['team']['robot_name']
-            }
-            self.laptop_sock.sendto(json.dumps(info).encode('utf-8'), addr)
-            print(f"[System] Sent team info to laptop: {info['team_name']}")
-        except Exception as e:
-            print(f"[System] Failed to send team info: {e}")
     
     async def control_loop(self):
         """Main control loop"""

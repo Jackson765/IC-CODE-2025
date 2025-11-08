@@ -15,36 +15,33 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from typing import Optional, Dict
 
-# ============ DEFAULT CONFIG ============
-DEFAULT_CONFIG = {
-    "robot_ip": "192.168.50.147",
-    "robot_port": 5005,
-    "gv_ip": "192.168.50.67",
-    "gv_port": 6000,
-    "team_id": 1,
-    "controls": {
-        "base_speed": 0.6,
-        "boost_speed": 1.0,
-        # Customizable key bindings
-        "forward": "w",
-        "backward": "s",
-        "left": "a",
-        "right": "d",
-        "boost": "shift_l",
-        "fire": "space",
-        "servo1_up": "q",
-        "servo1_down": "z",
-        "servo2_up": "e",
-        "servo2_down": "c",
-        "gpio1_toggle": "1",
-        "gpio2_toggle": "2",
-        "gpio3_toggle": "3",
-        "gpio4_toggle": "4",
-        "lights_toggle": "l"
-    }
+# ============ CONFIG PATHS ============
+# Laptop now reads from Pi's team_config.json - single source of truth!
+PI_CONFIG_PATH = "../Pi/team_config.json"
+CONFIG_FILE = PI_CONFIG_PATH  # For backwards compatibility
+
+# Video port calculation: GV video port = 5000 + team_id
+# Default controls (only thing not in team_config.json)
+DEFAULT_CONTROLS = {
+    "base_speed": 0.6,
+    "boost_speed": 1.0,
+    "forward": "w",
+    "backward": "s",
+    "left": "a",
+    "right": "d",
+    "boost": "shift_l",
+    "fire": "space",
+    "servo1_up": "q",
+    "servo1_down": "z",
+    "servo2_up": "e",
+    "servo2_down": "c",
+    "gpio1_toggle": "1",
+    "gpio2_toggle": "2",
+    "gpio3_toggle": "3",
+    "gpio4_toggle": "4",
+    "lights_toggle": "l"
 }
 
-CONFIG_FILE = "laptop_config.json"
 SEND_HZ = 30
 
 GST_RECEIVER_CMD_TEMPLATE = (
@@ -55,51 +52,121 @@ GST_RECEIVER_CMD_TEMPLATE = (
 
 
 class Config:
-    """Configuration manager"""
+    """Configuration manager - receives config from Pi over UDP"""
     
-    def __init__(self):
-        self.data = self.load_config()
+    def __init__(self, robot_ip: str = None):
+        """Initialize config - will request from Pi"""
+        self.data = None  # Will be populated by Pi
+        self.robot_ip = robot_ip  # Need this to send initial request
+        self.controls = self.load_controls()
+        self.config_received = False
     
-    def load_config(self):
-        """Load configuration from file"""
-        if os.path.exists(CONFIG_FILE):
+    def set_robot_config(self, config_data: Dict):
+        """Set configuration data received from Pi"""
+        self.data = config_data
+        self.config_received = True
+        print(f"[Config] ✅ Received config from Pi")
+        print(f"[Config] Team: {config_data.get('team', {}).get('team_name')}")
+        print(f"[Config] Robot: {config_data.get('team', {}).get('robot_name')}")
+    
+    def load_controls(self):
+        """Load or create controls configuration"""
+        controls_file = "laptop_controls.json"
+        if os.path.exists(controls_file):
             try:
-                with open(CONFIG_FILE, 'r') as f:
-                    config = json.load(f)
-                    print(f"[Config] Loaded from {CONFIG_FILE}")
-                    return config
+                with open(controls_file, 'r') as f:
+                    controls = json.load(f)
+                    print(f"[Config] Loaded controls from {controls_file}")
+                    return controls
             except Exception as e:
-                print(f"[Config] Error loading: {e}")
+                print(f"[Config] Error loading controls: {e}")
         
-        print("[Config] Using defaults")
-        return DEFAULT_CONFIG.copy()
+        print("[Config] Using default controls")
+        return DEFAULT_CONTROLS.copy()
     
-    def save_config(self):
-        """Save configuration to file"""
+    def save_controls(self):
+        """Save controls configuration"""
+        controls_file = "laptop_controls.json"
         try:
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(self.data, f, indent=2)
-            print(f"[Config] Saved to {CONFIG_FILE}")
+            with open(controls_file, 'w') as f:
+                json.dump(self.controls, f, indent=2)
+            print(f"[Config] Saved controls to {controls_file}")
             return True
         except Exception as e:
-            print(f"[Config] Error saving: {e}")
+            print(f"[Config] Error saving controls: {e}")
             return False
     
     def get(self, *keys):
-        """Get nested value"""
+        """Get nested value from config or controls"""
+        # First try controls
+        if keys[0] == 'controls':
+            if len(keys) == 1:
+                return self.controls
+            return self.controls.get(keys[1])
+        
+        # Then try main config
+        if self.data is None:
+            return None
+            
         value = self.data
         for key in keys:
-            value = value.get(key)
+            if isinstance(value, dict):
+                value = value.get(key)
+            else:
+                return None
             if value is None:
                 return None
         return value
     
     def set(self, value, *keys):
-        """Set nested value"""
+        """Set nested value in controls"""
+        if keys[0] == 'controls':
+            if len(keys) == 2:
+                self.controls[keys[1]] = value
+            return
+        
+        # For other values, set in main config (though we shouldn't modify team_config.json)
         d = self.data
         for key in keys[:-1]:
             d = d.setdefault(key, {})
         d[keys[-1]] = value
+    
+    def get_robot_ip(self):
+        """Get robot IP"""
+        return self.get('network', 'robot_ip')
+    
+    def get_robot_port(self):
+        """Get robot listen port"""
+        return self.get('network', 'robot_listen_port')
+    
+    def get_gv_ip(self):
+        """Get game viewer IP"""
+        return self.get('network', 'game_viewer_ip')
+    
+    def get_gv_port(self):
+        """Get game viewer control port"""
+        return self.get('network', 'game_viewer_control_port')
+    
+    def get_video_port(self):
+        """Get laptop video receive port (constant)"""
+        return self.get('network', 'laptop_video_port')
+    
+    def get_gv_video_port(self):
+        """Calculate GV video port: 5000 + team_id"""
+        team_id = self.get('team', 'team_id')
+        return 5000 + team_id
+    
+    def get_team_id(self):
+        """Get team ID"""
+        return self.get('team', 'team_id')
+    
+    def get_team_name(self):
+        """Get team name"""
+        return self.get('team', 'team_name')
+    
+    def get_robot_name(self):
+        """Get robot name"""
+        return self.get('team', 'robot_name')
 
 
 class KeyboardController:
@@ -117,18 +184,13 @@ class KeyboardController:
         self.vr = 0.0
         self.boost = False
         
-        # Servo positions (0.0 to 1.0)
-        self.servo1_pos = 0.5
-        self.servo2_pos = 0.5
+        # Servo toggle states (True = MAX, False = MIN)
+        self.servo1_at_max = False
+        self.servo2_at_max = False
         
         # GPIO states
         self.gpio_states = [False, False, False, False]
         self.lights_on = False
-        
-        # Servo control timing
-        self.servo_step = 0.05
-        self.servo_last_update = 0
-        self.servo_update_interval = 0.1  # 100ms
         
         # Fire cooldown
         self.last_fire_time = 0
@@ -157,7 +219,7 @@ class KeyboardController:
         return key
     
     def _handle_toggle_key(self, key):
-        """Handle toggle keys (GPIO and lights)"""
+        """Handle toggle keys (GPIO, lights, and SERVOS)"""
         controls = self.config.get('controls')
         
         # GPIO toggles
@@ -170,6 +232,23 @@ class KeyboardController:
         if key == controls.get('lights_toggle', ''):
             self.lights_on = not self.lights_on
             print(f"[Keyboard] Lights = {self.lights_on}")
+        
+        # SERVO TOGGLES - Q/Z for servo1, E/C for servo2
+        if key == controls.get('servo1_up', 'q'):
+            self.servo1_at_max = not self.servo1_at_max
+            print(f"[Keyboard] Servo1 toggled to {'MAX' if self.servo1_at_max else 'MIN'}")
+        
+        if key == controls.get('servo1_down', 'z'):
+            self.servo1_at_max = not self.servo1_at_max
+            print(f"[Keyboard] Servo1 toggled to {'MAX' if self.servo1_at_max else 'MIN'}")
+        
+        if key == controls.get('servo2_up', 'e'):
+            self.servo2_at_max = not self.servo2_at_max
+            print(f"[Keyboard] Servo2 toggled to {'MAX' if self.servo2_at_max else 'MIN'}")
+        
+        if key == controls.get('servo2_down', 'c'):
+            self.servo2_at_max = not self.servo2_at_max
+            print(f"[Keyboard] Servo2 toggled to {'MAX' if self.servo2_at_max else 'MIN'}")
     
     def update(self):
         """Update control state based on pressed keys"""
@@ -210,30 +289,6 @@ class KeyboardController:
         self.vy *= speed
         self.vr *= speed
         
-        # Update servos (continuous while held)
-        current_time = time.time()
-        if current_time - self.servo_last_update >= self.servo_update_interval:
-            servo_changed = False
-            
-            # Servo 1
-            if controls.get('servo1_up', 'q') in self.keys_pressed:
-                self.servo1_pos = min(1.0, self.servo1_pos + self.servo_step)
-                servo_changed = True
-            if controls.get('servo1_down', 'z') in self.keys_pressed:
-                self.servo1_pos = max(0.0, self.servo1_pos - self.servo_step)
-                servo_changed = True
-            
-            # Servo 2
-            if controls.get('servo2_up', 'e') in self.keys_pressed:
-                self.servo2_pos = min(1.0, self.servo2_pos + self.servo_step)
-                servo_changed = True
-            if controls.get('servo2_down', 'c') in self.keys_pressed:
-                self.servo2_pos = max(0.0, self.servo2_pos - self.servo_step)
-                servo_changed = True
-            
-            if servo_changed:
-                self.servo_last_update = current_time
-        
         # Fire handling
         fire_pressed = controls.get('fire', 'space') in self.keys_pressed
         
@@ -243,8 +298,8 @@ class KeyboardController:
             'vr': self.vr,
             'boost': self.boost,
             'fire': fire_pressed,
-            'servo1': self.servo1_pos,
-            'servo2': self.servo2_pos,
+            'servo1_toggle': self.servo1_at_max,
+            'servo2_toggle': self.servo2_at_max,
             'gpio': self.gpio_states,
             'lights': self.lights_on
         }
@@ -267,12 +322,11 @@ class RobotControlGUI:
         self.root.geometry("800x700")
         self.root.configure(bg='#1a1a1a')
         
-        # Config
-        self.config = Config()
+        # Get robot IP from user at startup
+        robot_ip = self.prompt_robot_ip()
         
-        # Team info (will be populated from GV registration)
-        self.team_name = "Unknown"
-        self.robot_name = "Unknown"
+        # Config (will be populated from Pi)
+        self.config = Config(robot_ip)
         
         # Keyboard controller
         self.keyboard = KeyboardController(self.config)
@@ -312,8 +366,14 @@ class RobotControlGUI:
         self.control_thread = None
         self.gv_listener_thread = None
         
-        # Setup GUI
+        # Setup GUI (before requesting config so we can show status)
         self.setup_gui()
+        
+        # Request config from Pi and wait for response
+        self.request_pi_config()
+        
+        # Update team info now that we have config
+        self.update_team_info()
         
         # Bind keyboard
         self.root.bind('<KeyPress>', self.keyboard.on_key_press)
@@ -429,17 +489,24 @@ class RobotControlGUI:
                              bg='#2a2a2a', fg='white', padx=10, pady=10)
         frame.pack(fill='x', pady=5)
         
-        self.team_name_label = tk.Label(frame, text=self.team_name,
+        self.team_name_label = tk.Label(frame, text="Waiting for config...",
                                         font=('Arial', 14, 'bold'), bg='#2a2a2a', fg='#00ffff')
         self.team_name_label.pack()
         
-        self.robot_label = tk.Label(frame, text=f"Robot: {self.robot_name}",
+        self.robot_label = tk.Label(frame, text=f"Robot: ...",
                               font=('Arial', 10), bg='#2a2a2a', fg='#aaaaaa')
         self.robot_label.pack()
         
-        team_id_label = tk.Label(frame, text=f"Team ID: {self.config.get('team_id')}",
+        self.team_id_label = tk.Label(frame, text=f"Team ID: ...",
                                 font=('Arial', 10), bg='#2a2a2a', fg='#aaaaaa')
-        team_id_label.pack()
+        self.team_id_label.pack()
+    
+    def update_team_info(self):
+        """Update team info labels after config is received"""
+        if self.config.config_received:
+            self.team_name_label.config(text=self.config.get_team_name())
+            self.robot_label.config(text=f"Robot: {self.config.get_robot_name()}")
+            self.team_id_label.config(text=f"Team ID: {self.config.get_team_id()}")
     
     def create_game_status_frame(self, parent):
         """Game status frame"""
@@ -503,9 +570,9 @@ MECANUM DRIVE:
 COMBAT:
   Space - Fire Laser
 
-SERVOS:
-  Q/Z - Servo 1 Up/Down
-  E/C - Servo 2 Up/Down
+SERVOS (Toggle MIN/MAX):
+  Q/Z - Toggle Servo 1
+  E/C - Toggle Servo 2
 
 GPIO:
   1/2/3/4 - Toggle GPIO 1-4
@@ -523,13 +590,13 @@ GPIO:
         
         tk.Label(servo_frame, text="Servo 1:", font=('Arial', 9),
                 bg='#2a2a2a', fg='#aaaaaa').grid(row=0, column=0, sticky='w')
-        self.servo1_label = tk.Label(servo_frame, text="50%", font=('Arial', 9, 'bold'),
+        self.servo1_label = tk.Label(servo_frame, text="MIN", font=('Arial', 9, 'bold'),
                                      bg='#2a2a2a', fg='#00ff00')
         self.servo1_label.grid(row=0, column=1, sticky='w', padx=5)
         
         tk.Label(servo_frame, text="Servo 2:", font=('Arial', 9),
                 bg='#2a2a2a', fg='#aaaaaa').grid(row=1, column=0, sticky='w')
-        self.servo2_label = tk.Label(servo_frame, text="50%", font=('Arial', 9, 'bold'),
+        self.servo2_label = tk.Label(servo_frame, text="MIN", font=('Arial', 9, 'bold'),
                                      bg='#2a2a2a', fg='#00ff00')
         self.servo2_label.grid(row=1, column=1, sticky='w', padx=5)
     
@@ -589,7 +656,7 @@ GPIO:
                 time.sleep(30.0)
                 
                 if self.running:  # Check again after sleep
-                    local_port = self.config.get('laptop_listen_port') or 6100
+                    local_port = 6100 + self.config.get_team_id()
                     self.register_with_gv(local_port)
                     
                     # Also check if we've lost contact with GV
@@ -616,20 +683,26 @@ GPIO:
                 data, addr = self.robot_sock.recvfrom(4096)
                 message = json.loads(data.decode('utf-8'))
                 
+                msg_type = message.get('type')
+                
+                # Handle config response
+                if msg_type == 'CONFIG_RESPONSE':
+                    config_data = message.get('config')
+                    if config_data:
+                        self.config.set_robot_config(config_data)
+                    continue
+                
+                # Handle STATUS response with fire confirmation
+                if msg_type == 'STATUS':
+                    if message.get('fire_success', False):
+                        self.shots_fired += 1
+                    continue
+                
                 # Update connection status
                 current_time = time.time()
                 if current_time - last_response_time > 0.5:  # Only update every 500ms
                     self.robot_connected = True
                     last_response_time = current_time
-                
-                # Handle different message types from Pi
-                msg_type = message.get('type', 'STATUS')
-                
-                if msg_type == 'TEAM_INFO':
-                    # Receive team info from Pi
-                    self.team_name = message.get('team_name', 'Unknown')
-                    self.robot_name = message.get('robot_name', 'Unknown')
-                    print(f"[Robot] Received team info: {self.team_name} / {self.robot_name}")
                 
                 # Debug: Print first response
                 if not hasattr(self, '_debug_robot_response'):
@@ -713,8 +786,8 @@ GPIO:
         """Send message to robot"""
         try:
             data = json.dumps(message).encode('utf-8')
-            robot_ip = self.config.get('robot_ip')
-            robot_port = self.config.get('robot_port')
+            robot_ip = self.config.get_robot_ip()
+            robot_port = self.config.get_robot_port()
             self.robot_sock.sendto(data, (robot_ip, robot_port))
             
             # Debug: Print first message of each type
@@ -747,8 +820,8 @@ GPIO:
         listen_sock.settimeout(1.0)
         
         try:
-            # Use fixed port from config (different from robot's 6000)
-            local_port = self.config.get('laptop_listen_port') or 6100
+            # Use fixed port: 6100 + team_id
+            local_port = 6100 + self.config.get_team_id()
             listen_sock.bind(('0.0.0.0', local_port))
             print(f"[GV] Listening on port {local_port}")
             
@@ -791,9 +864,9 @@ GPIO:
         """Register this laptop with Game Viewer"""
         message = {
             'type': 'REGISTER',
-            'team_id': self.config.get('team_id'),
-            'team_name': self.team_name,  # Use team info from Pi
-            'robot_name': self.robot_name,  # Use team info from Pi
+            'team_id': self.config.get_team_id(),
+            'team_name': self.config.get_team_name(),
+            'robot_name': self.config.get_robot_name(),
             'listen_port': listen_port
         }
         self.send_to_gv(message)
@@ -803,8 +876,8 @@ GPIO:
         """Send message to Game Viewer"""
         try:
             data = json.dumps(message).encode('utf-8')
-            gv_ip = self.config.get('gv_ip')
-            gv_port = self.config.get('gv_port')
+            gv_ip = self.config.get_gv_ip()
+            gv_port = self.config.get_gv_port()
             self.gv_sock.sendto(data, (gv_ip, gv_port))
         except Exception as e:
             print(f"[Network] Failed to send to GV: {e}")
@@ -827,13 +900,6 @@ GPIO:
         
         elif msg_type == 'REGISTER_ACK':
             print("[GV] Registration acknowledged")
-            # Extract team info from registration acknowledgment
-            if 'team_name' in message:
-                self.team_name = message['team_name']
-                print(f"[GV] Team name: {self.team_name}")
-            if 'robot_name' in message:
-                self.robot_name = message['robot_name']
-                print(f"[GV] Robot name: {self.robot_name}")
         
         elif msg_type == 'READY_CHECK':
             print(f"[GV] Received ready check - Current status: {self.ready_status}")
@@ -899,7 +965,7 @@ GPIO:
         # Send to Game Viewer
         message = {
             'type': 'READY_STATUS',
-            'team_id': self.config.get('team_id'),
+            'team_id': self.config.get_team_id(),
             'ready': self.ready_status
         }
         self.send_to_gv(message)
@@ -923,9 +989,7 @@ GPIO:
             return
         
         try:
-            # Calculate video port based on team_id (5100 + team_id)
-            team_id = self.config.get('team_id')
-            port = 5100 + team_id
+            port = self.config.get_video_port()
             cmd = GST_RECEIVER_CMD_TEMPLATE.format(port=port)
             self.video_process = subprocess.Popen(cmd, shell=True)
             
@@ -954,10 +1018,6 @@ GPIO:
         """Update GUI periodically"""
         if not self.running:
             return
-        
-        # Update team info labels
-        self.team_name_label.config(text=self.team_name)
-        self.robot_label.config(text=f"Robot: {self.robot_name}")
         
         # Update disabled state
         if self.is_disabled:
@@ -1024,11 +1084,11 @@ GPIO:
         self.shots_label.config(text=f"Shots Fired: {self.shots_fired}")
         self.hits_label.config(text=f"Hits Taken: {self.hits_taken}")
         
-        # Update servo positions
-        servo1_pct = int(self.keyboard.servo1_pos * 100)
-        servo2_pct = int(self.keyboard.servo2_pos * 100)
-        self.servo1_label.config(text=f"{servo1_pct}%")
-        self.servo2_label.config(text=f"{servo2_pct}%")
+        # Update servo positions (show MIN/MAX instead of percentage)
+        servo1_pos = "MAX" if self.keyboard.servo1_at_max else "MIN"
+        servo2_pos = "MAX" if self.keyboard.servo2_at_max else "MIN"
+        self.servo1_label.config(text=f"{servo1_pos}")
+        self.servo2_label.config(text=f"{servo2_pos}")
         
         # Schedule next update
         self.root.after(100, self.update_gui)
@@ -1039,9 +1099,9 @@ GPIO:
         """Open settings dialog"""
         dialog = SettingsDialog(self.root, self.config)
         if dialog.result:
-            # Reload config
-            self.config.data = self.config.load_config()
-            self.team_name_label.config(text=self.config.get('team_name'))
+            # Reload controls
+            self.config.controls = self.config.load_controls()
+            self.team_name_label.config(text=self.config.get_team_name())
             print("[Config] Settings updated")
     
     # ============ CLEANUP ============
@@ -1104,10 +1164,9 @@ class SettingsDialog:
                                    bg='#2a2a2a', fg='white', font=('Arial', 11, 'bold'))
         team_frame.pack(fill='x', pady=5)
         
+        self.create_field(team_frame, "Team Name:", 'team_name')
+        self.create_field(team_frame, "Robot Name:", 'robot_name')
         self.create_field(team_frame, "Team ID:", 'team_id')
-        
-        tk.Label(team_frame, text="Note: Team/Robot names are set in Pi config and synced via GV",
-                bg='#2a2a2a', fg='#888888', font=('Arial', 8, 'italic')).pack(pady=5)
         
         # Network settings
         net_frame = tk.LabelFrame(main_frame, text="Network Settings",
@@ -1118,9 +1177,7 @@ class SettingsDialog:
         self.create_field(net_frame, "Robot Port:", 'robot_port')
         self.create_field(net_frame, "GV IP:", 'gv_ip')
         self.create_field(net_frame, "GV Port:", 'gv_port')
-        
-        tk.Label(net_frame, text="Note: Video port is auto-calculated (5100 + Team ID)",
-                bg='#2a2a2a', fg='#888888', font=('Arial', 8, 'italic')).pack(pady=5)
+        self.create_field(net_frame, "Video Port:", 'video_port')
         
         # Speed settings
         speed_frame = tk.LabelFrame(main_frame, text="Speed Settings",
